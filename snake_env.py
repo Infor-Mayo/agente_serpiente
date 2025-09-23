@@ -34,8 +34,29 @@ DIRECTION_VECTORS = {
 }
 
 class SnakeEnvironment:
-    def __init__(self, render=True):
+    def __init__(self, render=False, max_steps=1000, reward_config=None):
         self.render_game = render
+        self.grid_width = GRID_WIDTH
+        self.grid_height = GRID_HEIGHT
+        self.max_steps = max_steps  # Límite de pasos por episodio (configurable)
+        
+        # Sistema de recompensas para comportamiento directo y eficiente
+        self.reward_config = reward_config or {
+            'food': 20.0,              # Gran recompensa por comer (objetivo principal)
+            'death': -15.0,            # Castigo fuerte por morir
+            'step': -0.3,              # Presión fuerte por eficiencia
+            'approach': 0.0,           # NO premiar solo acercarse
+            'retreat': -1.0,           # Castigo severo por alejarse
+            'direct_movement': 0.8,    # Premiar movimiento hacia la comida
+            'efficiency_bonus': 2.0,   # Bonus por ruta eficiente
+            'wasted_movement': -0.5    # Castigo por movimientos innecesarios
+        }
+        
+        # Variables para tracking de eficiencia
+        self.initial_distance = None
+        self.min_distance_achieved = None
+        self.steps_since_progress = 0
+        
         if self.render_game:
             self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
             pygame.display.set_caption("Snake RL Training")
@@ -43,6 +64,14 @@ class SnakeEnvironment:
             self.font = pygame.font.Font(None, 24)
         
         self.reset()
+    
+    def update_max_steps(self, new_max_steps):
+        """Actualiza el límite máximo de steps"""
+        self.max_steps = new_max_steps
+    
+    def update_reward_config(self, new_config):
+        """Actualiza la configuración de recompensas"""
+        self.reward_config.update(new_config)
     
     def reset(self):
         """Reinicia el juego y devuelve el estado inicial"""
@@ -52,21 +81,43 @@ class SnakeEnvironment:
         self.direction = RIGHT
         self.score = 0
         self.steps = 0
-        self.max_steps = 1000  # Evitar episodios infinitos
         
-        # Generar comida
+        # Generar primera comida
         self._generate_food()
+        
+        # Inicializar tracking de eficiencia
+        head_x, head_y = self.snake_positions[0]
+        self.initial_distance = abs(head_x - self.food_position[0]) + abs(head_y - self.food_position[1])
+        self.min_distance_achieved = self.initial_distance
+        self.steps_since_progress = 0
         
         return self._get_state()
     
     def _generate_food(self):
         """Genera una nueva posición de comida"""
-        while True:
+        attempts = 0
+        while attempts < 100:  # Evitar bucle infinito
             x = random.randint(0, GRID_WIDTH - 1)
             y = random.randint(0, GRID_HEIGHT - 1)
-            if (x, y) not in self.snake_positions:
+            
+            # Verificar que esté dentro de los límites y no en la serpiente
+            if (0 <= x < GRID_WIDTH and 0 <= y < GRID_HEIGHT and 
+                (x, y) not in self.snake_positions):
                 self.food_position = (x, y)
+                
+                
+                # Reinicializar tracking para nueva comida
+                if len(self.snake_positions) > 0:
+                    head_x, head_y = self.snake_positions[0]
+                    self.initial_distance = abs(head_x - x) + abs(head_y - y)
+                    self.min_distance_achieved = self.initial_distance
+                    self.steps_since_progress = 0
                 break
+            attempts += 1
+        
+        # Si no se pudo generar comida válida, usar posición segura
+        if attempts >= 100:
+            self.food_position = (GRID_WIDTH // 2, GRID_HEIGHT // 2)
     
     def _get_state(self):
         """
@@ -136,22 +187,26 @@ class SnakeEnvironment:
         old_distance = abs(old_head[0] - self.food_position[0]) + abs(old_head[1] - self.food_position[1])
         new_distance = abs(new_head[0] - self.food_position[0]) + abs(new_head[1] - self.food_position[1])
         
-        # Colisión con paredes
+        # Colisión con paredes (verificación reforzada)
         if (new_head[0] < 0 or new_head[0] >= GRID_WIDTH or 
             new_head[1] < 0 or new_head[1] >= GRID_HEIGHT):
             done = True
-            reward = -10
+            reward = self.reward_config['death']
+            # No actualizar posición si hay colisión - mantener serpiente en última posición válida
+            return self._get_state(), reward, done, {'score': self.score, 'steps': self.steps}
         
         # Colisión consigo misma
         elif new_head in self.snake_positions:
             done = True
-            reward = -10
+            reward = self.reward_config['death']
+            # No actualizar posición si hay colisión
+            return self._get_state(), reward, done, {'score': self.score, 'steps': self.steps}
         
         # Comió comida
         elif new_head == self.food_position:
             self.snake_positions.insert(0, new_head)
             self.score += 1
-            reward = 10
+            reward = self.reward_config['food']
             self._generate_food()
         
         # Movimiento normal
@@ -159,15 +214,35 @@ class SnakeEnvironment:
             self.snake_positions.insert(0, new_head)
             self.snake_positions.pop()
             
-            # Recompensa base por tiempo
-            reward = -0.1
+            # Recompensa base por tiempo (presión por eficiencia)
+            reward = self.reward_config['step']
             
-            # Recompensa por acercarse a la comida / castigo por alejarse
+            # Sistema de recompensas para comportamiento directo
             if new_distance < old_distance:
-                reward += 0.5  # Recompensa por acercarse
+                # PROGRESO HACIA LA COMIDA
+                reward += self.reward_config['direct_movement']
+                
+                # Bonus extra si es un nuevo récord de cercanía
+                if new_distance < self.min_distance_achieved:
+                    self.min_distance_achieved = new_distance
+                    reward += self.reward_config['efficiency_bonus']
+                    self.steps_since_progress = 0
+                else:
+                    self.steps_since_progress += 1
+                    
             elif new_distance > old_distance:
-                reward -= 0.3  # Castigo por alejarse
-            # Si la distancia es igual, no hay recompensa/castigo adicional
+                # ALEJARSE DE LA COMIDA (muy malo)
+                reward += self.reward_config['retreat']
+                self.steps_since_progress += 1
+                
+            else:
+                # MOVIMIENTO LATERAL (no progresa)
+                reward += self.reward_config['wasted_movement']
+                self.steps_since_progress += 1
+            
+            # Castigo adicional por perder mucho tiempo sin progreso
+            if self.steps_since_progress > 5:
+                reward -= 0.2 * (self.steps_since_progress - 5)  # Castigo creciente
         
         # Terminar si el episodio es muy largo
         if self.steps >= self.max_steps:
