@@ -72,7 +72,7 @@ class REINFORCEAgent:
     """
     Agente que implementa el algoritmo REINFORCE
     """
-    def __init__(self, state_size=14, action_size=4, learning_rate=0.001, gamma=0.99):
+    def __init__(self, state_size=14, action_size=4, learning_rate=0.0005, gamma=0.99):
         self.state_size = state_size
         self.action_size = action_size
         self.gamma = gamma
@@ -97,6 +97,17 @@ class REINFORCEAgent:
     
     def select_action(self, state):
         """Selecciona una acción usando la política actual"""
+        action, log_prob = self.policy_net.select_action(state)
+        
+        # Guardar para el entrenamiento
+        self.log_probs.append(log_prob)
+        self.states.append(state)
+        self.actions.append(action)
+        
+        return action, {}  # Retornar activaciones vacías por compatibilidad
+    
+    def select_action_fast(self, state):
+        """🚀 Versión optimizada para máxima velocidad"""
         action, log_prob = self.policy_net.select_action(state)
         
         # Guardar para el entrenamiento

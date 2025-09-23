@@ -28,9 +28,15 @@ class MultiAgentVisualTrainer:
         self.font_small = pygame.font.Font(None, 16)
         self.font_large = pygame.font.Font(None, 24)
         
-        # Control de velocidad (quintuplicado: hasta 1200 FPS)
-        self.speed_options = [1, 2, 5, 10, 20, 30, 60, 120, 180, 240, 360, 480, 600, 720, 960, 1200]
+        # Control de velocidad EXTREMA (hasta 6000 FPS reales)
+        self.speed_options = [1, 2, 5, 10, 20, 30, 60, 120, 240, 480, 960, 1200, 2400, 3600, 4800, 6000]
         self.current_speed_index = 3  # Empezar en 10 FPS
+        
+        # 🚀 OPTIMIZACIONES DE VELOCIDAD
+        self.render_skip_counter = 0
+        self.render_skip_frequency = 1  # Renderizar cada N frames
+        self.batch_processing = True
+        self.fast_mode = False
         self.paused = False
         
         # Colores
@@ -102,34 +108,34 @@ class MultiAgentVisualTrainer:
         self.max_steps = 1000
         self.max_episodes = 5000  # Tope de episodios (mínimo 1000)
         
-        # 🎭 PERSONALIDADES DE RECOMPENSA - Cada agente tendrá una personalidad única
+        # 🎭 PERSONALIDADES OPTIMIZADAS - Aprendizaje más rápido de supervivencia
         self.reward_personalities = [
-            # Personalidad 1: AGRESIVO - Busca comida rápidamente
-            {'name': 'Agresivo', 'food': 25.0, 'death': -20.0, 'step': -0.5, 'approach': 0.0, 'retreat': -2.0, 'direct_movement': 1.5, 'efficiency_bonus': 3.0, 'wasted_movement': -1.0},
+            # Personalidad 1: SUPERVIVIENTE - Evita muerte a toda costa
+            {'name': 'Superviviente', 'food': 50.0, 'death': -100.0, 'step': -0.1, 'approach': 1.0, 'retreat': -2.0, 'direct_movement': 2.0, 'efficiency_bonus': 5.0, 'wasted_movement': -0.5},
             
-            # Personalidad 2: CONSERVADOR - Evita riesgos
-            {'name': 'Conservador', 'food': 15.0, 'death': -10.0, 'step': -0.2, 'approach': 0.2, 'retreat': -0.5, 'direct_movement': 0.5, 'efficiency_bonus': 1.0, 'wasted_movement': -0.2},
+            # Personalidad 2: INTELIGENTE - Balance perfecto
+            {'name': 'Inteligente', 'food': 40.0, 'death': -80.0, 'step': -0.2, 'approach': 0.8, 'retreat': -1.5, 'direct_movement': 1.8, 'efficiency_bonus': 4.0, 'wasted_movement': -0.8},
             
-            # Personalidad 3: EXPLORADOR - Le gusta moverse
-            {'name': 'Explorador', 'food': 18.0, 'death': -12.0, 'step': -0.1, 'approach': 0.3, 'retreat': -0.3, 'direct_movement': 0.4, 'efficiency_bonus': 1.2, 'wasted_movement': 0.1},
+            # Personalidad 3: CAZADOR - Busca comida agresivamente pero seguro
+            {'name': 'Cazador', 'food': 60.0, 'death': -120.0, 'step': -0.3, 'approach': 1.2, 'retreat': -3.0, 'direct_movement': 2.5, 'efficiency_bonus': 6.0, 'wasted_movement': -1.0},
             
-            # Personalidad 4: EFICIENTE - Optimiza rutas
-            {'name': 'Eficiente', 'food': 22.0, 'death': -18.0, 'step': -0.4, 'approach': 0.0, 'retreat': -1.5, 'direct_movement': 1.2, 'efficiency_bonus': 4.0, 'wasted_movement': -1.5},
+            # Personalidad 4: ESTRATEGA - Planifica bien
+            {'name': 'Estratega', 'food': 45.0, 'death': -90.0, 'step': -0.15, 'approach': 0.9, 'retreat': -2.5, 'direct_movement': 2.2, 'efficiency_bonus': 7.0, 'wasted_movement': -1.2},
             
-            # Personalidad 5: EQUILIBRADO - Balanceado
-            {'name': 'Equilibrado', 'food': 20.0, 'death': -15.0, 'step': -0.3, 'approach': 0.1, 'retreat': -1.0, 'direct_movement': 0.8, 'efficiency_bonus': 2.0, 'wasted_movement': -0.5},
+            # Personalidad 5: EQUILIBRADO - Mejorado
+            {'name': 'Equilibrado', 'food': 35.0, 'death': -70.0, 'step': -0.25, 'approach': 0.7, 'retreat': -1.8, 'direct_movement': 1.5, 'efficiency_bonus': 3.5, 'wasted_movement': -0.6},
             
-            # Personalidad 6: PACIENTE - Toma su tiempo
-            {'name': 'Paciente', 'food': 30.0, 'death': -25.0, 'step': -0.1, 'approach': 0.5, 'retreat': -0.8, 'direct_movement': 0.6, 'efficiency_bonus': 1.5, 'wasted_movement': -0.1},
+            # Personalidad 6: CAUTELOSO - Muy seguro
+            {'name': 'Cauteloso', 'food': 30.0, 'death': -150.0, 'step': -0.1, 'approach': 0.5, 'retreat': -1.0, 'direct_movement': 1.0, 'efficiency_bonus': 2.0, 'wasted_movement': -0.3},
             
-            # Personalidad 7: TEMERARIO - Arriesga mucho
-            {'name': 'Temerario', 'food': 35.0, 'death': -5.0, 'step': -0.6, 'approach': -0.1, 'retreat': -3.0, 'direct_movement': 2.0, 'efficiency_bonus': 5.0, 'wasted_movement': -2.0},
+            # Personalidad 7: EFICIENTE - Máxima optimización
+            {'name': 'Eficiente', 'food': 55.0, 'death': -110.0, 'step': -0.4, 'approach': 0.6, 'retreat': -2.8, 'direct_movement': 3.0, 'efficiency_bonus': 8.0, 'wasted_movement': -2.0},
             
-            # Personalidad 8: CAUTELOSO - Muy cuidadoso
-            {'name': 'Cauteloso', 'food': 12.0, 'death': -30.0, 'step': -0.15, 'approach': 0.4, 'retreat': -0.2, 'direct_movement': 0.3, 'efficiency_bonus': 0.8, 'wasted_movement': -0.1},
+            # Personalidad 8: ADAPTATIVO - Se ajusta
+            {'name': 'Adaptativo', 'food': 42.0, 'death': -85.0, 'step': -0.2, 'approach': 0.8, 'retreat': -2.2, 'direct_movement': 1.9, 'efficiency_bonus': 4.5, 'wasted_movement': -0.9},
             
-            # Personalidad 9: HÍBRIDO - Adaptativo
-            {'name': 'Híbrido', 'food': 24.0, 'death': -16.0, 'step': -0.35, 'approach': 0.15, 'retreat': -1.2, 'direct_movement': 1.0, 'efficiency_bonus': 2.5, 'wasted_movement': -0.7}
+            # Personalidad 9: MAESTRO - El mejor balance
+            {'name': 'Maestro', 'food': 65.0, 'death': -130.0, 'step': -0.3, 'approach': 1.5, 'retreat': -3.5, 'direct_movement': 2.8, 'efficiency_bonus': 9.0, 'wasted_movement': -1.5}
         ]
         
         # Asignar personalidades a agentes (cada agente tiene su propia configuración)
@@ -151,6 +157,7 @@ class MultiAgentVisualTrainer:
             env = SnakeEnvironment(render=False, max_steps=self.max_steps, reward_config=personality)
             self.envs.append(env)
             self.agent_names.append(f"{personality['name']}")  # Usar nombre de personalidad
+            print(f"[INIT] Agente {i+1} ({personality['name']}): Food={personality['food']}, Death={personality['death']}")
         
         # Estadísticas por agente
         self.episode = 0
@@ -237,10 +244,57 @@ class MultiAgentVisualTrainer:
     def increase_speed(self):
         if self.current_speed_index < len(self.speed_options) - 1:
             self.current_speed_index += 1
+            self.update_render_optimization()
     
     def decrease_speed(self):
         if self.current_speed_index > 0:
             self.current_speed_index -= 1
+            self.update_render_optimization()
+    
+    def update_render_optimization(self):
+        """Actualiza optimizaciones basadas en la velocidad"""
+        current_speed = self.speed_options[self.current_speed_index]
+        
+        if current_speed >= 1200:  # Modo TURBO
+            self.render_skip_frequency = max(1, current_speed // 600)  # Renderizar cada N frames
+            self.fast_mode = True
+            print(f"[TURBO] Modo rápido activado - Renderizando cada {self.render_skip_frequency} frames")
+        else:
+            self.render_skip_frequency = 1
+            self.fast_mode = False
+    
+    def get_real_activations(self, agent_idx, state):
+        """Obtiene activaciones reales de la red neuronal"""
+        import torch
+        import torch.nn.functional as F
+        
+        # Convertir estado a tensor
+        state_tensor = torch.FloatTensor(state).unsqueeze(0)
+        
+        # Obtener la red del agente
+        policy_net = self.agents[agent_idx].policy_net
+        
+        # Forward pass manual para capturar activaciones
+        with torch.no_grad():
+            # Capa 1
+            x1 = F.relu(policy_net.fc1(state_tensor))
+            
+            # Capa 2  
+            x2 = F.relu(policy_net.fc2(x1))
+            
+            # Capa 3
+            x3 = F.relu(policy_net.fc3(x2))
+            
+            # Salida
+            output = F.softmax(policy_net.fc4(x3), dim=-1)
+        
+        return {
+            'input': state,
+            'layer1': x1.squeeze().numpy().tolist(),
+            'layer2': x2.squeeze().numpy().tolist(), 
+            'layer3': x3.squeeze().numpy().tolist(),
+            'output': output.squeeze().numpy().tolist()
+        }
     
     def increase_steps(self):
         """Aumenta el límite de steps máximos"""
@@ -304,7 +358,7 @@ class MultiAgentVisualTrainer:
     
     def increase_episodes(self):
         """Aumenta el tope de episodios"""
-        episode_increments = [1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 50000]
+        episode_increments = [1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000]
         current_idx = 3  # Default a 5000
         for i, episodes in enumerate(episode_increments):
             if self.max_episodes == episodes:
@@ -729,6 +783,7 @@ class MultiAgentVisualTrainer:
                 pygame.draw.circle(self.screen, color, (x, y), 6)
                 pygame.draw.circle(self.screen, self.BLACK, (x, y), 6, 1)
                 
+                # 🔧 CORRECCIÓN: Guardar (x, y, activation) para TODAS las capas
                 layer_pos.append((x, y, activation))
                 
                 # Destacar acción seleccionada en output
@@ -737,8 +792,8 @@ class MultiAgentVisualTrainer:
             
             neuron_positions.append(layer_pos)
         
-        # Dibujar conexiones simplificadas
-        self.draw_simple_connections(neuron_positions)
+        # Dibujar conexiones LIMPIAS (solo las más importantes)
+        self.draw_clean_connections(neuron_positions, layers)
         
         # Información de acción
         action_names = ["UP", "DOWN", "LEFT", "RIGHT"]
@@ -750,27 +805,45 @@ class MultiAgentVisualTrainer:
         prob_surface = self.font_small.render(probs_text, True, self.BLACK)
         self.screen.blit(prob_surface, (self.neural_area.x + 10, self.neural_area.y + self.neural_area.height - 20))
     
-    def draw_simple_connections(self, neuron_positions):
-        """Dibuja conexiones simplificadas entre neuronas"""
-        for layer_idx in range(len(neuron_positions) - 1):
-            current_layer = neuron_positions[layer_idx]
-            next_layer = neuron_positions[layer_idx + 1]
+    def draw_clean_connections(self, neuron_positions, layers):
+        """Dibuja conexiones limpias entre TODAS las capas"""
+        for i in range(len(neuron_positions) - 1):
+            current_layer = neuron_positions[i]
+            next_layer = neuron_positions[i + 1]
             
-            # Solo conectar las neuronas más activas
-            for curr_x, curr_y, curr_activation in current_layer:
-                if abs(curr_activation) < 0.2:
-                    continue
-                
-                for next_x, next_y, next_activation in next_layer:
-                    if abs(next_activation) < 0.2:
-                        continue
+            # Dibujar conexiones entre capas adyacentes
+            for j, neuron_data in enumerate(current_layer):
+                if len(neuron_data) >= 3:  # (x, y, activation)
+                    x1, y1, activation1 = neuron_data
                     
-                    # Conexión simple
-                    connection_strength = abs(curr_activation * next_activation)
-                    if connection_strength > 0.05:
-                        alpha = min(150, int(connection_strength * 300))
-                        color = (0, alpha, 0) if curr_activation * next_activation > 0 else (alpha, 0, 0)
-                        pygame.draw.line(self.screen, color, (curr_x, curr_y), (next_x, next_y), 1)
+                    # Umbral MUY bajo para mostrar más conexiones
+                    if abs(activation1) > 0.01:  # Muy permisivo
+                        # Conectar a las 4 neuronas más activas de la siguiente capa
+                        next_activations = []
+                        for k, next_neuron_data in enumerate(next_layer):
+                            if len(next_neuron_data) >= 3:
+                                x2, y2, activation2 = next_neuron_data
+                                next_activations.append((k, x2, y2, activation2))
+                        
+                        # Ordenar por activación y tomar las top 4
+                        next_activations.sort(key=lambda x: abs(x[3]), reverse=True)
+                        
+                        for k, x2, y2, activation2 in next_activations[:4]:  # Top 4
+                            if abs(activation2) > 0.001:  # Umbral mínimo
+                                # Color basado en la fuerza de la conexión
+                                strength = (abs(activation1) + abs(activation2)) / 2
+                                # Alpha más visible - mínimo 30, máximo 180
+                                alpha = max(30, min(180, int(150 * strength + 30)))
+                                
+                                if activation1 > 0 and activation2 > 0:
+                                    color = (0, alpha, 0)  # Verde para activaciones positivas
+                                elif activation1 < 0 or activation2 < 0:
+                                    color = (alpha, 0, 0)  # Rojo para activaciones negativas
+                                else:
+                                    color = (alpha, alpha, 0)  # Amarillo para mixtas
+                                
+                                # Línea más visible
+                                pygame.draw.line(self.screen, color, (int(x1), int(y1)), (int(x2), int(y2)), 1)
     
     def draw_training_info(self):
         """Dibuja panel de información compacto"""
@@ -899,24 +972,12 @@ class MultiAgentVisualTrainer:
             
             # Pausa
             if self.paused:
-                self.screen.fill(self.BLACK)
-                for i in range(9):
-                    if not done_flags[i]:
-                        self.draw_game(i, states[i], {'score': self.envs[i].score, 'steps': steps[i]})
-                
-                # Mostrar red neuronal del agente seleccionado
-                if not done_flags[self.neural_display_agent]:
-                    activations = self.get_network_activations(self.neural_display_agent, states[self.neural_display_agent])
-                    self.draw_neural_network_simple(activations, self.last_action or 0)
-                
-                # 🎨 Dibujar todos los paneles por separado (diseño mejorado)
-                self.draw_training_info()      # Panel de control (lado derecho)
-                self.draw_agent_stats()        # Estadísticas de agentes (lado izquierdo)
-                self.draw_progress_graph()     # Gráfico de progreso (separado)
-                self.draw_controls()           # Controles (parte inferior)
-                pygame.display.flip()
-                self.clock.tick(30)
+                self.clock.tick(30)  # Reducir CPU durante pausa
                 continue
+            
+            # 🚀 OPTIMIZACIÓN: Contador de renderizado
+            self.render_skip_counter += 1
+            should_render = (self.render_skip_counter % self.render_skip_frequency == 0)
             
             # Actualizar qué agente mostrar en la red neuronal
             self.update_neural_display_agent(done_flags)
@@ -926,32 +987,41 @@ class MultiAgentVisualTrainer:
                 if done_flags[i]:
                     continue
                 
-                # Obtener activaciones (solo para el agente que se muestra)
-                if i == self.neural_display_agent:
-                    activations = self.get_network_activations(i, states[i])
-                    self.last_activations = activations
-                
-                # Seleccionar acción
-                action = self.agents[i].select_action(states[i])
-                if i == self.neural_display_agent:
-                    self.last_action = action
+                # 🚀 PROCESAMIENTO OPTIMIZADO
+                # Seleccionar acción (sin activaciones innecesarias en modo turbo)
+                if self.fast_mode and i != self.neural_display_agent:
+                    # Modo rápido: solo acción, sin activaciones
+                    action = self.agents[i].select_action_fast(states[i])
+                else:
+                    # Modo normal: con activaciones para visualización
+                    action, activations = self.agents[i].select_action(states[i])
+                    if i == self.neural_display_agent:
+                        # Obtener activaciones reales de la red neuronal
+                        self.last_activations = self.get_real_activations(i, states[i])
+                        self.last_action = action
                 
                 # Ejecutar acción
-                next_state, reward, done, info = self.envs[i].step(action)
+                new_state, reward, done, info = self.envs[i].step(action)
+                
+                # 🔧 CRÍTICO: Guardar recompensa para REINFORCE
                 self.agents[i].store_reward(reward)
                 
+                # Debug para verificar aprendizaje
+                if i == 0 and steps[i] % 50 == 0:  # Solo agente 0, cada 50 steps
+                    print(f"[DEBUG] Agente 1 - Step {steps[i]}: reward={reward:.2f}, total={total_rewards[i]:.2f}")
+                
+                # Actualizar
+                states[i] = new_state
                 total_rewards[i] += reward
                 steps[i] += 1
+                
+                if done:
+                    done_flags[i] = True
                 
                 # Actualizar estadísticas actuales
                 self.current_episode_scores[i] = info['score']
                 self.current_episode_rewards[i] = total_rewards[i]
                 self.current_episode_steps[i] = steps[i]
-                
-                if done:
-                    done_flags[i] = True
-                else:
-                    states[i] = next_state
             
             # Dibujar todo
             self.screen.fill(self.BLACK)
@@ -961,26 +1031,36 @@ class MultiAgentVisualTrainer:
                     self.draw_game(i, states[i], {'score': self.envs[i].score, 'steps': steps[i]})
             
             # Mostrar red neuronal del agente seleccionado
-            if not done_flags[self.neural_display_agent] and hasattr(self, 'last_activations'):
+            if not done_flags[self.neural_display_agent] and hasattr(self, 'last_activations') and self.last_activations:
                 self.draw_neural_network_simple(self.last_activations, self.last_action)
             
-            # 🎨 Dibujar todos los paneles por separado (diseño mejorado)
-            self.draw_training_info()      # Panel de control (lado derecho)
-            self.draw_agent_stats()        # Estadísticas de agentes (lado izquierdo)
-            self.draw_progress_graph()     # Gráfico de progreso (separado)
-            self.draw_controls()           # Controles (parte inferior)
+            # 🚀 RENDERIZADO CONDICIONAL PARA VELOCIDAD EXTREMA
+            if should_render:
+                # 🎨 Dibujar todos los paneles por separado (diseño mejorado)
+                self.draw_training_info()      # Panel de control (lado derecho)
+                self.draw_agent_stats()        # Estadísticas de agentes (lado izquierdo)
+                self.draw_progress_graph()     # Gráfico de progreso (separado)
+                self.draw_controls()           # Controles (parte inferior)
+                
+                pygame.display.flip()
             
-            pygame.display.flip()
-            
-            # Control de velocidad
+            # Control de velocidad OPTIMIZADO
             current_speed = self.speed_options[self.current_speed_index]
-            self.clock.tick(current_speed)
+            if self.fast_mode:
+                # En modo turbo, no limitar FPS con clock.tick()
+                pass  # Máxima velocidad posible
+            else:
+                self.clock.tick(current_speed)
         
         # Finalizar episodios y actualizar estadísticas
         losses = []
         for i in range(9):
             loss = self.agents[i].finish_episode(total_rewards[i], steps[i])
             losses.append(loss)
+            
+            # Debug del entrenamiento
+            if i == 0:  # Solo agente 0
+                print(f"[TRAIN] Episodio {self.episode} - Agente 1: Loss={loss:.4f}, Reward={total_rewards[i]:.2f}, Steps={steps[i]}")
             
             # Actualizar estadísticas
             score = self.envs[i].score

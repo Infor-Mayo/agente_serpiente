@@ -212,31 +212,38 @@ class SnakeEnvironment:
         # Movimiento normal
         else:
             self.snake_positions.insert(0, new_head)
-            self.snake_positions.pop()
+            self.snake_positions.pop()  # Remover cola
             
-            # Recompensa base por tiempo (presión por eficiencia)
-            reward = self.reward_config['step']
+            # Recompensas por movimiento
+            reward += self.reward_config['step']
             
-            # Sistema de recompensas para comportamiento directo
+            # RECOMPENSA POR EVITAR PELIGROS (NUEVA)
+            danger_avoided_bonus = 0
+            # Verificar si estaba cerca de una pared y se alejó
+            head_x, head_y = new_head
+            
+            # Distancias a las paredes
+            dist_to_walls = [
+                head_y,  # arriba
+                GRID_HEIGHT - 1 - head_y,  # abajo
+                head_x,  # izquierda
+                GRID_WIDTH - 1 - head_x   # derecha
+            ]
+            
+            # Si está cerca de una pared (distancia <= 2) pero no chocó, dar bonus
+            min_wall_distance = min(dist_to_walls)
+            if min_wall_distance <= 2:
+                danger_avoided_bonus = (3 - min_wall_distance) * 2.0  # Más bonus cuanto más cerca
+                reward += danger_avoided_bonus
+            
+            # Recompensa por acercarse a la comida
             if new_distance < old_distance:
-                # PROGRESO HACIA LA COMIDA
                 reward += self.reward_config['direct_movement']
-                
-                # Bonus extra si es un nuevo récord de cercanía
-                if new_distance < self.min_distance_achieved:
-                    self.min_distance_achieved = new_distance
+                # Bonus por eficiencia si se acerca mucho
+                if new_distance <= 2:
                     reward += self.reward_config['efficiency_bonus']
-                    self.steps_since_progress = 0
-                else:
-                    self.steps_since_progress += 1
-                    
             elif new_distance > old_distance:
-                # ALEJARSE DE LA COMIDA (muy malo)
-                reward += self.reward_config['retreat']
-                self.steps_since_progress += 1
-                
-            else:
-                # MOVIMIENTO LATERAL (no progresa)
+                reward += self.reward_config['retreat']  # Castigo por alejarse
                 reward += self.reward_config['wasted_movement']
                 self.steps_since_progress += 1
             
