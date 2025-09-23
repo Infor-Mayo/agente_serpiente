@@ -3,14 +3,15 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import os
+from snake_env import SnakeEnvironment
+from neural_network import REINFORCEAgent
+import torch
 import random
 import copy
 import time
 import datetime
 import torch.nn.functional as F
 from collections import deque
-from snake_env import SnakeEnvironment
-from neural_network import REINFORCEAgent
 
 class MultiAgentVisualTrainer:
     """
@@ -111,31 +112,31 @@ class MultiAgentVisualTrainer:
         # 🎭 PERSONALIDADES OPTIMIZADAS - Aprendizaje más rápido de supervivencia
         self.reward_personalities = [
             # Personalidad 1: SUPERVIVIENTE - Evita muerte a toda costa
-            {'name': 'Superviviente', 'food': 50.0, 'death': -100.0, 'step': -0.1, 'approach': 1.0, 'retreat': -2.0, 'direct_movement': 2.0, 'efficiency_bonus': 5.0, 'wasted_movement': -0.5},
+            {'name': 'Superviviente', 'food': 50.0, 'death': -100.0, 'self_collision': -120.0, 'step': -0.1, 'approach': 1.0, 'retreat': -2.0, 'direct_movement': 2.0, 'efficiency_bonus': 5.0, 'wasted_movement': -0.5},
             
             # Personalidad 2: INTELIGENTE - Balance perfecto
-            {'name': 'Inteligente', 'food': 40.0, 'death': -80.0, 'step': -0.2, 'approach': 0.8, 'retreat': -1.5, 'direct_movement': 1.8, 'efficiency_bonus': 4.0, 'wasted_movement': -0.8},
+            {'name': 'Inteligente', 'food': 40.0, 'death': -80.0, 'self_collision': -100.0, 'step': -0.2, 'approach': 0.8, 'retreat': -1.5, 'direct_movement': 1.8, 'efficiency_bonus': 4.0, 'wasted_movement': -0.8},
             
             # Personalidad 3: CAZADOR - Busca comida agresivamente pero seguro
-            {'name': 'Cazador', 'food': 60.0, 'death': -120.0, 'step': -0.3, 'approach': 1.2, 'retreat': -3.0, 'direct_movement': 2.5, 'efficiency_bonus': 6.0, 'wasted_movement': -1.0},
+            {'name': 'Cazador', 'food': 60.0, 'death': -120.0, 'self_collision': -140.0, 'step': -0.3, 'approach': 1.2, 'retreat': -3.0, 'direct_movement': 2.5, 'efficiency_bonus': 6.0, 'wasted_movement': -1.0},
             
             # Personalidad 4: ESTRATEGA - Planifica bien
-            {'name': 'Estratega', 'food': 45.0, 'death': -90.0, 'step': -0.15, 'approach': 0.9, 'retreat': -2.5, 'direct_movement': 2.2, 'efficiency_bonus': 7.0, 'wasted_movement': -1.2},
+            {'name': 'Estratega', 'food': 45.0, 'death': -90.0, 'self_collision': -110.0, 'step': -0.15, 'approach': 0.9, 'retreat': -2.5, 'direct_movement': 2.2, 'efficiency_bonus': 7.0, 'wasted_movement': -1.2},
             
             # Personalidad 5: EQUILIBRADO - Mejorado
-            {'name': 'Equilibrado', 'food': 35.0, 'death': -70.0, 'step': -0.25, 'approach': 0.7, 'retreat': -1.8, 'direct_movement': 1.5, 'efficiency_bonus': 3.5, 'wasted_movement': -0.6},
+            {'name': 'Equilibrado', 'food': 35.0, 'death': -70.0, 'self_collision': -90.0, 'step': -0.25, 'approach': 0.7, 'retreat': -1.8, 'direct_movement': 1.5, 'efficiency_bonus': 3.5, 'wasted_movement': -0.6},
             
             # Personalidad 6: CAUTELOSO - Muy seguro
-            {'name': 'Cauteloso', 'food': 30.0, 'death': -150.0, 'step': -0.1, 'approach': 0.5, 'retreat': -1.0, 'direct_movement': 1.0, 'efficiency_bonus': 2.0, 'wasted_movement': -0.3},
+            {'name': 'Cauteloso', 'food': 30.0, 'death': -150.0, 'self_collision': -180.0, 'step': -0.1, 'approach': 0.5, 'retreat': -1.0, 'direct_movement': 1.0, 'efficiency_bonus': 2.0, 'wasted_movement': -0.3},
             
             # Personalidad 7: EFICIENTE - Máxima optimización
-            {'name': 'Eficiente', 'food': 55.0, 'death': -110.0, 'step': -0.4, 'approach': 0.6, 'retreat': -2.8, 'direct_movement': 3.0, 'efficiency_bonus': 8.0, 'wasted_movement': -2.0},
+            {'name': 'Eficiente', 'food': 55.0, 'death': -110.0, 'self_collision': -130.0, 'step': -0.4, 'approach': 0.6, 'retreat': -2.8, 'direct_movement': 3.0, 'efficiency_bonus': 8.0, 'wasted_movement': -2.0},
             
             # Personalidad 8: ADAPTATIVO - Se ajusta
-            {'name': 'Adaptativo', 'food': 42.0, 'death': -85.0, 'step': -0.2, 'approach': 0.8, 'retreat': -2.2, 'direct_movement': 1.9, 'efficiency_bonus': 4.5, 'wasted_movement': -0.9},
+            {'name': 'Adaptativo', 'food': 42.0, 'death': -85.0, 'self_collision': -105.0, 'step': -0.2, 'approach': 0.8, 'retreat': -2.2, 'direct_movement': 1.9, 'efficiency_bonus': 4.5, 'wasted_movement': -0.9},
             
             # Personalidad 9: MAESTRO - El mejor balance
-            {'name': 'Maestro', 'food': 65.0, 'death': -130.0, 'step': -0.3, 'approach': 1.5, 'retreat': -3.5, 'direct_movement': 2.8, 'efficiency_bonus': 9.0, 'wasted_movement': -1.5}
+            {'name': 'Maestro', 'food': 65.0, 'death': -130.0, 'self_collision': -150.0, 'step': -0.3, 'approach': 1.5, 'retreat': -3.5, 'direct_movement': 2.8, 'efficiency_bonus': 9.0, 'wasted_movement': -1.5}
         ]
         
         # Asignar personalidades a agentes (cada agente tiene su propia configuración)
@@ -183,21 +184,18 @@ class MultiAgentVisualTrainer:
         os.makedirs('models', exist_ok=True)
         
         # Botones de control
-        self.buttons = self.create_buttons()
-    
-    def create_buttons(self):
-        """Crea los botones de control"""
-        return {
+        self.buttons = {
             'pause': pygame.Rect(20, self.controls_area.y + 5, 60, 30),
-            'speed_down': pygame.Rect(90, self.controls_area.y + 5, 25, 30),
-            'speed_up': pygame.Rect(120, self.controls_area.y + 5, 25, 30),
-            'evolve': pygame.Rect(150, self.controls_area.y + 5, 70, 30),
-            'steps_down': pygame.Rect(225, self.controls_area.y + 5, 25, 30),
-            'steps_up': pygame.Rect(255, self.controls_area.y + 5, 25, 30),
-            'rewards': pygame.Rect(285, self.controls_area.y + 5, 60, 30),
-            'episodes_down': pygame.Rect(350, self.controls_area.y + 5, 25, 30),
-            'episodes_up': pygame.Rect(380, self.controls_area.y + 5, 25, 30),
-            'stop_training': pygame.Rect(410, self.controls_area.y + 5, 50, 30)
+            'speed_down': pygame.Rect(90, self.controls_area.y + 5, 30, 30),
+            'speed_up': pygame.Rect(130, self.controls_area.y + 5, 30, 30),
+            'evolve': pygame.Rect(170, self.controls_area.y + 5, 60, 30),
+            'steps_down': pygame.Rect(240, self.controls_area.y + 5, 30, 30),
+            'steps_up': pygame.Rect(280, self.controls_area.y + 5, 30, 30),
+            'rewards': pygame.Rect(320, self.controls_area.y + 5, 70, 30),
+            'episodes_down': pygame.Rect(400, self.controls_area.y + 5, 30, 30),
+            'episodes_up': pygame.Rect(440, self.controls_area.y + 5, 30, 30),
+            'save_models': pygame.Rect(480, self.controls_area.y + 5, 50, 30),  # NUEVO BOTÓN
+            'stop_training': pygame.Rect(540, self.controls_area.y + 5, 50, 30)
         }
     
     def handle_events(self):
@@ -236,6 +234,8 @@ class MultiAgentVisualTrainer:
                         self.decrease_episodes()
                     elif self.buttons['episodes_up'].collidepoint(event.pos):
                         self.increase_episodes()
+                    elif self.buttons['save_models'].collidepoint(event.pos):
+                        self.save_models_manual()  # 🆕 GUARDAR MODELOS MANUALMENTE
                     elif self.buttons['stop_training'].collidepoint(event.pos):
                         return False  # Terminar simulación
         
@@ -356,10 +356,250 @@ class MultiAgentVisualTrainer:
         print(f"         Food: {new_personality['food']}, Death: {new_personality['death']}")
         print(f"         Direct: {new_personality['direct_movement']}, Efficiency: {new_personality['efficiency_bonus']}")
     
+    def save_models_manual(self):
+        """🆕 Guarda los mejores modelos manualmente en cualquier momento"""
+        import torch
+        from datetime import datetime
+        
+        print(f"\n[SAVE] Guardando modelos manualmente en episodio {self.episode}...")
+        
+        # Crear timestamp único
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Calcular estadísticas actuales de cada agente
+        agents_stats = []
+        for i in range(9):
+            # Calcular score promedio de los últimos episodios
+            recent_scores = self.agent_scores[i][-50:] if len(self.agent_scores[i]) >= 50 else self.agent_scores[i]
+            avg_score = sum(recent_scores) / len(recent_scores) if recent_scores else 0
+            
+            # Calcular total de manzanas y episodios
+            total_food = sum(self.agent_scores[i])
+            total_episodes = len(self.agent_scores[i])
+            
+            agents_stats.append({
+                'index': i,
+                'name': self.agent_names[i],
+                'best_score': self.agent_best_scores[i],
+                'avg_score': avg_score,
+                'total_food': total_food,
+                'total_episodes': total_episodes,
+                'current_score': self.current_episode_scores[i]
+            })
+        
+        # Ordenar por mejor score individual
+        agents_stats.sort(key=lambda x: x['best_score'], reverse=True)
+        
+        # Guardar top 5 agentes
+        saved_count = 0
+        for rank, agent in enumerate(agents_stats[:5]):  # Top 5
+            try:
+                agent_idx = agent['index']
+                
+                # Nombre del archivo
+                filename = f"models/manual_save_{rank+1}_{agent['name']}_ep{self.episode}_{timestamp}.pth"
+                
+                # Datos a guardar
+                save_data = {
+                    'model_state_dict': self.agents[agent_idx].policy_net.state_dict(),
+                    'episode': self.episode,
+                    'rank': rank + 1,
+                    'agent_name': agent['name'],
+                    'best_score': agent['best_score'],
+                    'avg_score': agent['avg_score'],
+                    'total_food': agent['total_food'],
+                    'total_episodes': agent['total_episodes'],
+                    'current_score': agent['current_score'],
+                    'personality': self.agent_personalities[agent_idx].copy(),
+                    'timestamp': timestamp,
+                    'manual_save': True
+                }
+                
+                # Guardar modelo
+                torch.save(save_data, filename)
+                saved_count += 1
+                
+                print(f"[SAVE] Puesto {rank+1}: {agent['name']} - Best: {agent['best_score']}, Avg: {agent['avg_score']:.2f}")
+                print(f"       Guardado: {filename}")
+                
+            except Exception as e:
+                print(f"[ERROR] Error guardando agente {agent['name']}: {e}")
+        
+        print(f"\n[SAVE] {saved_count} modelos guardados exitosamente!")
+        print(f"[INFO] Ubicacion: carpeta 'models/'")
+        print(f"[INFO] Timestamp: {timestamp}")
+    
+    def auto_save_checkpoint(self):
+        """💾 Guardado automático cada 500 episodios como checkpoint"""
+        import torch
+        from datetime import datetime
+        
+        print(f"\n[CHECKPOINT] Guardado automatico en episodio {self.episode}...")
+        
+        # Crear timestamp único
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Calcular estadísticas actuales de cada agente
+        agents_stats = []
+        for i in range(9):
+            # Calcular score promedio de los últimos episodios
+            recent_scores = self.agent_scores[i][-100:] if len(self.agent_scores[i]) >= 100 else self.agent_scores[i]
+            avg_score = sum(recent_scores) / len(recent_scores) if recent_scores else 0
+            
+            # Calcular total de manzanas y episodios
+            total_food = sum(self.agent_scores[i])
+            total_episodes = len(self.agent_scores[i])
+            
+            agents_stats.append({
+                'index': i,
+                'name': self.agent_names[i],
+                'best_score': self.agent_best_scores[i],
+                'avg_score': avg_score,
+                'total_food': total_food,
+                'total_episodes': total_episodes,
+                'current_score': self.current_episode_scores[i]
+            })
+        
+        # Ordenar por mejor score individual
+        agents_stats.sort(key=lambda x: x['best_score'], reverse=True)
+        
+        # Guardar top 3 agentes como checkpoint
+        saved_count = 0
+        for rank, agent in enumerate(agents_stats[:3]):  # Top 3 para checkpoints
+            try:
+                agent_idx = agent['index']
+                
+                # Nombre del archivo con prefijo checkpoint
+                filename = f"models/checkpoint_ep{self.episode}_{rank+1}_{agent['name']}_best{agent['best_score']}_{timestamp}.pth"
+                
+                # Datos a guardar
+                save_data = {
+                    'model_state_dict': self.agents[agent_idx].policy_net.state_dict(),
+                    'episode': self.episode,
+                    'rank': rank + 1,
+                    'agent_name': agent['name'],
+                    'best_score': agent['best_score'],
+                    'avg_score': agent['avg_score'],
+                    'total_food': agent['total_food'],
+                    'total_episodes': agent['total_episodes'],
+                    'current_score': agent['current_score'],
+                    'personality': self.agent_personalities[agent_idx].copy(),
+                    'timestamp': timestamp,
+                    'checkpoint_save': True,
+                    'training_progress': self.episode / self.max_episodes
+                }
+                
+                # Guardar modelo
+                torch.save(save_data, filename)
+                saved_count += 1
+                
+                print(f"[CHECKPOINT] Top {rank+1}: {agent['name']} - Best: {agent['best_score']}, Avg: {agent['avg_score']:.2f}")
+                
+            except Exception as e:
+                print(f"[ERROR] Error en checkpoint agente {agent['name']}: {e}")
+        
+        print(f"[CHECKPOINT] {saved_count} modelos guardados como checkpoint!")
+        if self.max_episodes != float('inf'):
+            print(f"[INFO] Progreso: {self.episode}/{self.max_episodes} ({100*self.episode/self.max_episodes:.1f}%)")
+        else:
+            print(f"[INFO] Episodio actual: {self.episode} (MODO INFINITO)")
+    
+    def show_stop_summary(self):
+        """🛑 Muestra resumen cuando el usuario para el entrenamiento y guarda modelos"""
+        import torch
+        from datetime import datetime
+        
+        training_time = time.time() - self.training_start_time if self.training_start_time else 0
+        
+        print("\n" + "="*80)
+        print("ENTRENAMIENTO DETENIDO POR USUARIO")
+        print("="*80)
+        
+        # Información general
+        print(f"Tiempo de entrenamiento: {datetime.timedelta(seconds=int(training_time))}")
+        print(f"Episodios completados: {self.episode}")
+        if self.max_episodes != float('inf'):
+            print(f"Progreso: {self.episode}/{self.max_episodes} ({100*self.episode/self.max_episodes:.1f}%)")
+        else:
+            print(f"Modo: INFINITO (sin limite)")
+        
+        # Crear ranking de agentes
+        agent_stats = []
+        for i in range(9):
+            total_episodes = len(self.agent_scores[i])
+            total_food = sum(self.agent_scores[i])
+            avg_score = total_food / max(total_episodes, 1)
+            
+            agent_stats.append({
+                'index': i,
+                'name': self.agent_names[i],
+                'best_score': self.agent_best_scores[i],
+                'best_episode': self.agent_best_episode[i],
+                'avg_score': avg_score,
+                'total_food': total_food,
+                'total_episodes': total_episodes
+            })
+        
+        # Ordenar por mejor score
+        agent_stats.sort(key=lambda x: x['best_score'], reverse=True)
+        
+        # Mostrar ranking
+        print(f"\nRANKING ACTUAL DE AGENTES:")
+        print("-" * 80)
+        print(f"{'Pos':<4} {'Agente':<10} {'Mejor':<6} {'Episodio':<8} {'Promedio':<9} {'Total':<8}")
+        print("-" * 80)
+        
+        for pos, agent in enumerate(agent_stats, 1):
+            medal = "1st" if pos == 1 else "2nd" if pos == 2 else "3rd" if pos == 3 else f"{pos:2d}"
+            print(f"{medal:<4} {agent['name']:<10} {agent['best_score']:<6} "
+                  f"{agent['best_episode']:<8} {agent['avg_score']:<9.2f} "
+                  f"{agent['total_food']:<8}")
+        
+        # Guardar mejores modelos al parar
+        print(f"\nGUARDANDO MODELOS AL PARAR:")
+        print("-" * 50)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Guardar top 3 agentes
+        saved_count = 0
+        for pos, agent in enumerate(agent_stats[:3], 1):
+            try:
+                agent_idx = agent['index']
+                filename = f"models/stop_save_ep{self.episode}_{pos}_{agent['name']}_best{agent['best_score']}_{timestamp}.pth"
+                
+                # Guardar modelo
+                torch.save({
+                    'model_state_dict': self.agents[agent_idx].policy_net.state_dict(),
+                    'episode': self.episode,
+                    'best_score': agent['best_score'],
+                    'best_episode': agent['best_episode'],
+                    'avg_score': agent['avg_score'],
+                    'total_food': agent['total_food'],
+                    'total_episodes': agent['total_episodes'],
+                    'training_time': training_time,
+                    'personality': self.agent_personalities[agent_idx].copy(),
+                    'timestamp': timestamp,
+                    'stop_save': True
+                }, filename)
+                
+                print(f"Top {pos}: {agent['name']} - Best: {agent['best_score']}, Avg: {agent['avg_score']:.2f}")
+                print(f"       Archivo: {filename}")
+                saved_count += 1
+                
+            except Exception as e:
+                print(f"[ERROR] Error guardando {agent['name']}: {e}")
+        
+        print(f"\n[STOP] {saved_count} modelos guardados al parar entrenamiento!")
+        print(f"[INFO] Ubicacion: carpeta 'models/'")
+        print("="*80)
+    
     def increase_episodes(self):
-        """Aumenta el tope de episodios"""
-        episode_increments = [1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000]
+        """Aumenta el tope de episodios incluyendo modo infinito"""
+        episode_increments = [1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, float('inf')]
         current_idx = 3  # Default a 5000
+        
+        # Encontrar índice actual
         for i, episodes in enumerate(episode_increments):
             if self.max_episodes == episodes:
                 current_idx = i
@@ -367,12 +607,17 @@ class MultiAgentVisualTrainer:
         
         if current_idx < len(episode_increments) - 1:
             self.max_episodes = episode_increments[current_idx + 1]
-            print(f"[CONFIG] Tope de episodios aumentado a: {self.max_episodes}")
+            if self.max_episodes == float('inf'):
+                print(f"[CONFIG] Modo INFINITO activado - Sin limite de episodios")
+            else:
+                print(f"[CONFIG] Tope de episodios aumentado a: {self.max_episodes}")
     
     def decrease_episodes(self):
         """Disminuye el tope de episodios (mínimo 1000)"""
-        episode_increments = [1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 50000]
+        episode_increments = [1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, float('inf')]
         current_idx = 3  # Default a 5000
+        
+        # Encontrar índice actual
         for i, episodes in enumerate(episode_increments):
             if self.max_episodes == episodes:
                 current_idx = i
@@ -600,6 +845,13 @@ class MultiAgentVisualTrainer:
         episodes_up_rect = episodes_up_text.get_rect(center=self.buttons['episodes_up'].center)
         self.screen.blit(episodes_up_text, episodes_up_rect)
         
+        # Botón de guardar modelos
+        pygame.draw.rect(self.screen, (0, 150, 0), self.buttons['save_models'])  # Verde
+        pygame.draw.rect(self.screen, self.BLACK, self.buttons['save_models'], 1)
+        save_text = self.font_small.render("SAVE", True, self.WHITE)
+        save_rect = save_text.get_rect(center=self.buttons['save_models'].center)
+        self.screen.blit(save_text, save_rect)
+        
         # Botón de parar entrenamiento
         pygame.draw.rect(self.screen, self.RED, self.buttons['stop_training'])
         pygame.draw.rect(self.screen, self.BLACK, self.buttons['stop_training'], 1)
@@ -607,19 +859,28 @@ class MultiAgentVisualTrainer:
         stop_rect = stop_text.get_rect(center=self.buttons['stop_training'].center)
         self.screen.blit(stop_text, stop_rect)
         
-        # Información
+        # Información (ajustada para no salir de ventana)
         current_speed = self.speed_options[self.current_speed_index]
         current_personality = self.agent_personalities[self.neural_display_agent]
+        
+        # Textos más compactos y posicionados correctamente
         info_texts = [
-            f"Velocidad: {current_speed} FPS",
-            f"Episodio: {self.episode}/{self.max_episodes}",
-            f"Steps Max: {self.max_steps}",
-            f"Red Neuronal: {current_personality['name']}"
+            f"Vel: {current_speed}",
+            f"Ep: {self.episode}/{self.max_episodes}",
+            f"Steps: {self.max_steps}",
+            f"Red: {current_personality['name'][:8]}"  # Truncar nombre largo
         ]
+        
+        # Espaciado ajustado para caber en ventana
+        start_x = 600  # Empezar más a la derecha
+        spacing = 95   # Espaciado reducido
         
         for i, text in enumerate(info_texts):
             rendered = self.font_small.render(text, True, self.BLACK)
-            self.screen.blit(rendered, (470 + i * 130, self.controls_area.y + 12))
+            x_pos = start_x + i * spacing
+            # Verificar que no se salga de la ventana
+            if x_pos + rendered.get_width() < self.screen_width - 10:
+                self.screen.blit(rendered, (x_pos, self.controls_area.y + 12))
     
     def draw_game(self, agent_idx, state, info):
         """Dibuja un juego individual"""
@@ -714,21 +975,22 @@ class MultiAgentVisualTrainer:
         pygame.draw.rect(self.screen, self.WHITE, self.neural_area)
         pygame.draw.rect(self.screen, self.BLACK, self.neural_area, 2)
         
-        # Título con color del agente (más corto)
+        # Título con color del agente y información en la misma línea
         agent_color = self.agent_colors[self.neural_display_agent]
         title = self.font_large.render(f"Red Neuronal - A{self.neural_display_agent + 1}", True, agent_color)
         self.screen.blit(title, (self.neural_area.x + 10, self.neural_area.y + 10))
         
-        # Información adicional del agente
-        score_info = self.font.render(f"Score Actual: {self.current_episode_scores[self.neural_display_agent]} | Steps: {self.current_episode_steps[self.neural_display_agent]}", True, self.BLACK)
-        self.screen.blit(score_info, (self.neural_area.x + 10, self.neural_area.y + 35))
+        # Información adicional del agente AL LADO del título
+        score_info = self.font.render(f"Score: {self.current_episode_scores[self.neural_display_agent]} | Steps: {self.current_episode_steps[self.neural_display_agent]}", True, self.BLACK)
+        title_width = title.get_width()
+        self.screen.blit(score_info, (self.neural_area.x + 20 + title_width, self.neural_area.y + 15))
         
-        # Configuración completa - mostrar todas las 14 entradas
+        # Configuración completa - mostrar todas las 62 entradas (22 originales + 40 posiciones cuerpo)
         layers = [
-            ('Input', activations['input']),  # Todas las 14 entradas
-            ('Hidden1', activations['layer1'][:10]),  # 10 neuronas representativas
-            ('Hidden2', activations['layer2'][:10]),
-            ('Hidden3', activations['layer3'][:10]),
+            ('Input', activations['input'][:20]),  # Mostrar solo 20 entradas más importantes
+            ('Hidden1', activations['layer1'][:15]),  # 15 neuronas representativas
+            ('Hidden2', activations['layer2'][:15]),
+            ('Hidden3', activations['layer3'][:15]),
             ('Output', activations['output'])
         ]
         
@@ -760,12 +1022,16 @@ class MultiAgentVisualTrainer:
             available_height = self.neural_area.height - 100  # Espacio disponible para neuronas
             neuron_spacing = min(15, available_height // max(max_neurons, 1)) if max_neurons > 0 else 15
             
-            # Etiquetas para las entradas (solo para capa Input)
+            # Etiquetas para las entradas (solo para capa Input) - Mostrando las 20 más importantes
             input_labels = [
-                "Dir↑", "Dir↓", "Dir←", "Dir→",  # Dirección actual
-                "Food X", "Food Y",              # Posición relativa comida
-                "Pelig↑", "Pelig↓", "Pelig←", "Pelig→",  # Peligros
-                "Dist↑", "Dist↓", "Dist←", "Dist→"       # Distancias a paredes
+                "Dir↑", "Dir↓", "Dir←", "Dir→",  # Dirección actual (4)
+                "Food X", "Food Y",              # Posición relativa comida (2)
+                "Pelig↑", "Pelig↓", "Pelig←", "Pelig→",  # Peligros (4)
+                "Dist↑", "Dist↓", "Dist←", "Dist→",      # Distancias a paredes (4)
+                # 🧠 Predicciones de movimientos futuros (6 de 8 mostradas)
+                "Pred↑F", "Pred↑S", "Pred↓F", "Pred↓S",  # Food progress + Safety
+                "Pred←F", "Pred←S"   # F=Food, S=Safety
+                # 🐍 Las posiciones del cuerpo están en las entradas 22-61 (no mostradas por espacio)
             ]
             
             for j, activation in enumerate(layer_data):
@@ -855,7 +1121,7 @@ class MultiAgentVisualTrainer:
         title = self.font_large.render("Sistema de Control", True, self.BLACK)
         self.screen.blit(title, (self.info_area.x + 10, self.info_area.y + 10))
         
-        # Información de configuración actual (más líneas para llenar el espacio)
+        # Información de configuración actual (espaciado corregido)
         current_personality = self.agent_personalities[self.neural_display_agent]
         config_lines = [
             f"Episodio: {self.episode} / {self.max_episodes}",
@@ -863,13 +1129,13 @@ class MultiAgentVisualTrainer:
             f"Red Neuronal: {current_personality['name']}",
             f"Modo: REINFORCE Puro",
             f"Food Reward: {current_personality['food']}",
-            f"Direct Movement: {current_personality['direct_movement']}",
-            f"Personalidad: {current_personality['name']}"
+            f"Direct Movement: {current_personality['direct_movement']}"
         ]
         
+        # Espaciado aumentado para evitar solapamiento
         for i, line in enumerate(config_lines):
             config_text = self.font_small.render(line, True, self.GRAY)
-            self.screen.blit(config_text, (self.info_area.x + 10, self.info_area.y + 35 + i * 16))
+            self.screen.blit(config_text, (self.info_area.x + 10, self.info_area.y + 40 + i * 20))
     
     def draw_agent_stats(self):
         """Dibuja estadísticas de agentes en formato horizontal compacto"""
@@ -1085,33 +1351,59 @@ class MultiAgentVisualTrainer:
         else:
             self.max_episodes = num_episodes
             
-        print(f"Iniciando entrenamiento multi-agente por {num_episodes} episodios...")
         self.training_start_time = time.time()
         
-        for episode in range(1, num_episodes + 1):
-            self.episode = episode
-            
-            # Verificar si se cambió el tope de episodios dinámicamente
-            if episode > self.max_episodes:
-                print(f"[INFO] Entrenamiento detenido - Alcanzado tope de episodios: {self.max_episodes}")
-                break
-            
-            # Entrenar episodio
-            result = self.train_episode()
-            if result is None:  # Usuario cerró ventana o presionó STOP
-                break
-            
-            total_rewards, steps, losses, scores = result
-            
-            # Evolución automática deshabilitada para no interferir con REINFORCE
-            # if episode % 50 == 0:
-            #     self.evolve_agents()
-            # Nota: Usar botón EVOLVE para evolución manual cuando sea necesario
-            
-            # Imprimir progreso
-            if episode % 10 == 0:
-                best_agent_idx = self.update_best_agent()
-                print(f"Episodio {episode:4d} | Scores: {scores} | Neural Display: Agente {self.neural_display_agent + 1} | Best Agent: {best_agent_idx + 1}")
+        # Configurar bucle para modo infinito o limitado
+        if self.max_episodes == float('inf'):
+            print(f"Iniciando entrenamiento multi-agente en MODO INFINITO...")
+            episode = 1
+            while True:  # Bucle infinito
+                self.episode = episode
+                
+                # Entrenar episodio
+                result = self.train_episode()
+                if result is None:  # Usuario cerró ventana o presionó STOP
+                    self.show_stop_summary()  # 🆕 Mostrar resumen al parar
+                    break
+                
+                total_rewards, steps, losses, scores = result
+                
+                # Imprimir progreso
+                if episode % 10 == 0:
+                    best_agent_idx = self.update_best_agent()
+                    print(f"Episodio {episode:4d} | Scores: {scores} | Neural Display: Agente {self.neural_display_agent + 1} | Best Agent: {best_agent_idx + 1}")
+                
+                # 💾 GUARDADO AUTOMÁTICO CADA 500 EPISODIOS
+                if episode % 500 == 0:
+                    self.auto_save_checkpoint()
+                
+                episode += 1  # Incrementar para modo infinito
+        else:
+            print(f"Iniciando entrenamiento multi-agente por {num_episodes} episodios...")
+            for episode in range(1, num_episodes + 1):
+                self.episode = episode
+                
+                # Verificar si se cambió el tope de episodios dinámicamente
+                if episode > self.max_episodes:
+                    print(f"[INFO] Entrenamiento detenido - Alcanzado tope de episodios: {self.max_episodes}")
+                    break
+                
+                # Entrenar episodio
+                result = self.train_episode()
+                if result is None:  # Usuario cerró ventana o presionó STOP
+                    self.show_stop_summary()  # 🆕 Mostrar resumen al parar
+                    break
+                
+                total_rewards, steps, losses, scores = result
+                
+                # Imprimir progreso
+                if episode % 10 == 0:
+                    best_agent_idx = self.update_best_agent()
+                    print(f"Episodio {episode:4d} | Scores: {scores} | Neural Display: Agente {self.neural_display_agent + 1} | Best Agent: {best_agent_idx + 1}")
+                
+                # 💾 GUARDADO AUTOMÁTICO CADA 500 EPISODIOS
+                if episode % 500 == 0:
+                    self.auto_save_checkpoint()
         
         # Mostrar resumen final
         self.show_final_summary()
@@ -1138,13 +1430,13 @@ class MultiAgentVisualTrainer:
         training_time = time.time() - self.training_start_time if self.training_start_time else 0
         
         print("\n" + "="*80)
-        print("🏆 RESUMEN FINAL DEL ENTRENAMIENTO")
+        print("RESUMEN FINAL DEL ENTRENAMIENTO")
         print("="*80)
         
         # Información general
-        print(f"⏱️  Tiempo total de entrenamiento: {datetime.timedelta(seconds=int(training_time))}")
-        print(f"📊 Episodios completados: {self.episode}")
-        print(f"🎯 Configuración de recompensas utilizada:")
+        print(f"Tiempo total de entrenamiento: {datetime.timedelta(seconds=int(training_time))}")
+        print(f"Episodios completados: {self.episode}")
+        print(f"Configuracion de recompensas utilizada:")
         print(f"   • Food: {self.reward_config['food']}")
         print(f"   • Death: {self.reward_config['death']}")
         print(f"   • Direct Movement: {self.reward_config['direct_movement']}")
@@ -1153,42 +1445,45 @@ class MultiAgentVisualTrainer:
         # Crear ranking de agentes
         agent_stats = []
         for i in range(9):
-            avg_score = np.mean(self.agent_scores[i]) if len(self.agent_scores[i]) > 0 else 0
             total_episodes = len(self.agent_scores[i])
+            total_food = sum(self.agent_scores[i])
+            avg_score = total_food / max(total_episodes, 1)
+            efficiency = total_food / max(self.agent_total_episodes[i], 1)
             
             agent_stats.append({
-                'id': i + 1,
                 'name': self.agent_names[i],
                 'best_score': self.agent_best_scores[i],
                 'best_episode': self.agent_best_episode[i],
                 'avg_score': avg_score,
-                'total_food': self.agent_total_food[i],
+                'total_food': total_food,
                 'total_episodes': total_episodes,
-                'efficiency': self.agent_total_food[i] / max(total_episodes, 1)
+                'efficiency': efficiency
             })
         
         # Ordenar por mejor score
         agent_stats.sort(key=lambda x: x['best_score'], reverse=True)
         
-        print(f"\n🏅 RANKING DE AGENTES (por mejor score):")
+        # Mostrar ranking
+        print(f"\nRANKING DE AGENTES (por mejor score):")
         print("-" * 80)
-        print(f"{'Pos':<4} {'Agente':<10} {'Mejor':<6} {'Episodio':<8} {'Promedio':<9} {'Total🍎':<8} {'Eficiencia':<10}")
+        print(f"{'Pos':<4} {'Agente':<10} {'Mejor':<6} {'Episodio':<8} {'Promedio':<9} {'Total':<8} {'Eficiencia':<10}")
         print("-" * 80)
         
         for pos, agent in enumerate(agent_stats, 1):
-            medal = "🥇" if pos == 1 else "🥈" if pos == 2 else "🥉" if pos == 3 else f"{pos:2d}"
+            medal = "1st" if pos == 1 else "2nd" if pos == 2 else "3rd" if pos == 3 else f"{pos:2d}"
             print(f"{medal:<4} {agent['name']:<10} {agent['best_score']:<6} "
                   f"{agent['best_episode']:<8} {agent['avg_score']:<9.2f} "
                   f"{agent['total_food']:<8} {agent['efficiency']:<10.2f}")
         
         # Guardar mejores modelos
-        print(f"\n💾 GUARDANDO MEJORES MODELOS:")
+        print(f"\nGUARDANDO MEJORES MODELOS:")
         print("-" * 50)
         
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Guardar top 3 agentes
         for pos, agent in enumerate(agent_stats[:3], 1):
+            agent_idx = agent_stats.index(agent)
             agent_idx = agent['id'] - 1
             filename = f"models/best_agent_{pos}_{agent['name'].replace(' ', '_')}_{timestamp}.pth"
             
@@ -1205,31 +1500,31 @@ class MultiAgentVisualTrainer:
                 'timestamp': timestamp
             }, filename)
             
-            print(f"🏆 Puesto {pos}: {agent['name']}")
-            print(f"   📁 Archivo: {filename}")
-            print(f"   🍎 Mejor score: {agent['best_score']} manzanas (episodio {agent['best_episode']})")
-            print(f"   📊 Promedio: {agent['avg_score']:.2f} manzanas")
-            print(f"   🎯 Total comidas: {agent['total_food']} manzanas")
+            print(f"Puesto {pos}: {agent['name']}")
+            print(f"   Archivo: {filename}")
+            print(f"   Mejor score: {agent['best_score']} manzanas (episodio {agent['best_episode']})")
+            print(f"   Promedio: {agent['avg_score']:.2f} manzanas")
+            print(f"   Total comidas: {agent['total_food']} manzanas")
             print()
         
         # Estadísticas adicionales
-        total_food_all = sum(self.agent_total_food)
+        total_food_all = sum(sum(scores) for scores in self.agent_scores)
         total_episodes_all = sum(len(scores) for scores in self.agent_scores)
         
-        print(f"📈 ESTADÍSTICAS GENERALES:")
-        print(f"   🍎 Total de manzanas comidas: {total_food_all}")
-        print(f"   📊 Total de episodios jugados: {total_episodes_all}")
-        print(f"   ⚡ Promedio de manzanas por episodio: {total_food_all / max(total_episodes_all, 1):.2f}")
+        print(f"ESTADISTICAS GENERALES:")
+        print(f"   Total de manzanas comidas: {total_food_all}")
+        print(f"   Total de episodios jugados: {total_episodes_all}")
+        print(f"   Promedio de manzanas por episodio: {total_food_all / max(total_episodes_all, 1):.2f}")
         
         # Mejor rendimiento general
         best_overall = agent_stats[0]
-        print(f"\n🎯 MEJOR RENDIMIENTO GENERAL:")
-        print(f"   🏆 Campeón: {best_overall['name']}")
-        print(f"   🍎 Récord: {best_overall['best_score']} manzanas")
-        print(f"   📅 Logrado en episodio: {best_overall['best_episode']}")
+        print(f"\nMEJOR RENDIMIENTO GENERAL:")
+        print(f"   Campeon: {best_overall['name']}")
+        print(f"   Record: {best_overall['best_score']} manzanas")
+        print(f"   Logrado en episodio: {best_overall['best_episode']}")
         
         print("\n" + "="*80)
-        print("¡Entrenamiento completado exitosamente! 🎉")
+        print("Entrenamiento completado exitosamente!")
         print("Los mejores modelos han sido guardados en la carpeta 'models/'")
         print("="*80)
 
