@@ -10,7 +10,7 @@ class PolicyNetwork(nn.Module):
     """
     Red neuronal que implementa una política para el juego de la serpiente
     """
-    def __init__(self, state_size=14, hidden_size=128, action_size=4):
+    def __init__(self, state_size=62, hidden_size=128, action_size=4):
         super(PolicyNetwork, self).__init__()
         
         self.state_size = state_size
@@ -72,7 +72,7 @@ class REINFORCEAgent:
     """
     Agente que implementa el algoritmo REINFORCE
     """
-    def __init__(self, state_size=14, action_size=4, learning_rate=0.0005, gamma=0.99):
+    def __init__(self, state_size=62, action_size=4, learning_rate=0.0005, gamma=0.99):
         self.state_size = state_size
         self.action_size = action_size
         self.gamma = gamma
