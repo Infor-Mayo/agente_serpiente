@@ -72,7 +72,7 @@ class REINFORCEAgent:
     """
     Agente que implementa el algoritmo REINFORCE
     """
-    def __init__(self, state_size=62, action_size=4, learning_rate=0.0005, gamma=0.99):
+    def __init__(self, state_size=62, action_size=4, learning_rate=0.003, gamma=0.99):
         self.state_size = state_size
         self.action_size = action_size
         self.gamma = gamma
@@ -146,6 +146,15 @@ class REINFORCEAgent:
         Actualiza la política usando el algoritmo REINFORCE
         """
         if len(self.rewards) == 0:
+            print("[WARNING] No hay recompensas para entrenar!")
+            return 0.0
+        
+        if len(self.log_probs) == 0:
+            print("[WARNING] No hay log_probs para entrenar!")
+            return 0.0
+        
+        if len(self.rewards) != len(self.log_probs):
+            print(f"[WARNING] Desbalance: {len(self.rewards)} rewards vs {len(self.log_probs)} log_probs!")
             return 0.0
         
         # Calcular retornos
