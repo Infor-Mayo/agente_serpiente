@@ -5,8 +5,8 @@ import random
 import torch
 from .game_modes import GameMode, load_models, PLAYER_COLORS
 from .ui_elements import Button
-from snake_env import SnakeEnvironment, GRID_WIDTH, GRID_HEIGHT, CELL_SIZE
-from neural_network import REINFORCEAgent
+from entrenamiento.snake_env import SnakeEnvironment, GRID_WIDTH, GRID_HEIGHT, CELL_SIZE
+from entrenamiento.neural_network import REINFORCEAgent
 
 WINDOW_WIDTH = 1200
 WINDOW_HEIGHT = 800
@@ -530,21 +530,25 @@ class GameApp:
     def create_config_menu(self):
         """Crea el menú de configuración"""
         self.menu_buttons = []
-        btn_w, btn_h = 300, 50
-        x = (self.current_width - btn_w) // 2
-        y0 = 250
-        spacing = 60
         
-        # Botones para número de agentes
-        self.menu_buttons.append(Button((x - 150, y0, 60, btn_h), "- Agentes", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.decrease_agents))
-        self.menu_buttons.append(Button((x + 90, y0, 60, btn_h), "+ Agentes", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.increase_agents))
+        # Centrar botones con mucho más espacio
+        center_x = self.current_width // 2
         
-        # Botones para tamaño de celda
-        self.menu_buttons.append(Button((x - 150, y0 + spacing, 60, btn_h), "- Tamaño", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.decrease_cell_size))
-        self.menu_buttons.append(Button((x + 90, y0 + spacing, 60, btn_h), "+ Tamaño", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.increase_cell_size))
+        # Botones para número de agentes (bien separados)
+        btn_w, btn_h = 100, 50
+        y_agents = 250
+        gap = 200  # Espacio entre botones
+        self.menu_buttons.append(Button((center_x - gap//2 - btn_w, y_agents, btn_w, btn_h), "- Agentes", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.decrease_agents))
+        self.menu_buttons.append(Button((center_x + gap//2, y_agents, btn_w, btn_h), "+ Agentes", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.increase_agents))
         
-        # Botón volver
-        self.menu_buttons.append(Button((x, y0 + 3*spacing, btn_w, btn_h), "Volver al Menu", self.font, (100,100,100), (255,255,255), (150,150,150), self.go_to_main_menu))
+        # Botones para tamaño de celda (bien separados)
+        y_size = 380
+        self.menu_buttons.append(Button((center_x - gap//2 - btn_w, y_size, btn_w, btn_h), "- Tamaño", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.decrease_cell_size))
+        self.menu_buttons.append(Button((center_x + gap//2, y_size, btn_w, btn_h), "+ Tamaño", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.increase_cell_size))
+        
+        # Botón volver (más abajo)
+        btn_back_w = 300
+        self.menu_buttons.append(Button((center_x - btn_back_w//2, 550, btn_back_w, 60), "Volver al Menu", self.font, (100,100,100), (255,255,255), (150,150,150), self.go_to_main_menu))
 
     def decrease_agents(self):
         if self.num_agents > 2:
@@ -565,29 +569,33 @@ class GameApp:
     def render_config(self):
         """Renderiza la pantalla de configuración"""
         title = self.font_big.render("CONFIGURACION", True, (255, 255, 0))
-        self.screen.blit(title, title.get_rect(center=(self.current_width//2, 120)))
+        self.screen.blit(title, title.get_rect(center=(self.current_width//2, 100)))
         
-        # Mostrar configuración actual
-        y_start = 200
+        # Mostrar configuración actual con mejor espaciado
+        center_x = self.current_width // 2
         
         # Número de agentes
         agents_text = f"Numero de Agentes: {self.num_agents}"
         agents_txt = self.font.render(agents_text, True, (255, 255, 255))
-        self.screen.blit(agents_txt, agents_txt.get_rect(center=(self.current_width//2, y_start)))
+        self.screen.blit(agents_txt, agents_txt.get_rect(center=(center_x, 180)))
         
-        # Tamaño de celda
+        # Botones de agentes están en y=250, dejamos espacio
+        
+        # Tamaño de celda  
         size_text = f"Tamaño de Celda: {self.cell_size}px"
         size_txt = self.font.render(size_text, True, (255, 255, 255))
-        self.screen.blit(size_txt, size_txt.get_rect(center=(self.current_width//2, y_start + 60)))
+        self.screen.blit(size_txt, size_txt.get_rect(center=(center_x, 320)))
+        
+        # Botones de tamaño están en y=380, dejamos espacio
         
         # Área de juego resultante
         game_area_w = self.grid_width * self.cell_size
         game_area_h = self.grid_height * self.cell_size
         area_text = f"Area de Juego: {game_area_w}x{game_area_h}px"
         area_txt = self.font_small.render(area_text, True, (180, 180, 180))
-        self.screen.blit(area_txt, area_txt.get_rect(center=(self.current_width//2, y_start + 100)))
+        self.screen.blit(area_txt, area_txt.get_rect(center=(center_x, 460)))
         
-        # Instrucciones
+        # Instrucciones (más abajo, sin solapar con botón)
         instructions = [
             "Usa los botones para ajustar la configuracion",
             "ESC para volver al menu principal"
@@ -595,7 +603,7 @@ class GameApp:
         
         for i, instruction in enumerate(instructions):
             txt = self.font_small.render(instruction, True, (150, 150, 150))
-            self.screen.blit(txt, txt.get_rect(center=(self.current_width//2, y_start + 140 + i * 25)))
+            self.screen.blit(txt, txt.get_rect(center=(center_x, 640 + i * 25)))
         
         # Botones
         for btn in self.menu_buttons:
@@ -619,20 +627,20 @@ class GameApp:
         self.human_env = SnakeEnvironment()
         self.human_env.reset()
         
-        # Crear 1-2 IAs
+        # Crear IAs según configuración (menos 1 por el humano)
         self.ia_envs = []
         self.ia_agents = []
         
-        num_ias = min(2, len(self.models)) if self.models else 1
+        num_ias = self.num_agents - 1  # Restar 1 porque hay un humano
         
         for i in range(num_ias):
             env = SnakeEnvironment()
             env.reset()
             self.ia_envs.append(env)
             
-            if i < len(self.models):
-                # Cargar modelo entrenado
-                model_info = self.models[i]
+            if self.models and len(self.models) > 0:
+                # Repetir modelos si hay más agentes que modelos
+                model_info = self.models[i % len(self.models)]
                 try:
                     print(f"[IA] Cargando modelo: {model_info['name']} desde {model_info['path']}")
                     agent = REINFORCEAgent(state_size=62, action_size=4)
