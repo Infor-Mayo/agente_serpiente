@@ -287,33 +287,57 @@ class SnakeEnvironment:
     
     def _evaluate_body_danger(self, x, y):
         """
-        🧠 Evalúa el peligro de auto-colisión en una posición
+        🧠 Evalúa el peligro de auto-colisión en una posición - VERSIÓN MEJORADA
         Retorna factor de seguridad (0.0 = muy peligroso, 1.0 = muy seguro)
         """
         if len(self.snake_positions) <= 3:  # Serpiente muy pequeña, poco peligro
-            return 0.9
+            return 0.95
         
         danger_factor = 1.0
+        head_x, head_y = self.snake_positions[0]
         
         # Evaluar proximidad a cada parte del cuerpo (excluyendo cabeza)
         for i, body_part in enumerate(self.snake_positions[1:], 1):
             body_x, body_y = body_part
             distance = abs(x - body_x) + abs(y - body_y)  # Distancia Manhattan
             
-            if distance == 0:  # Colisión directa
+            if distance == 0:  # Colisión directa - MUERTE INMEDIATA
                 return 0.0
-            elif distance == 1:  # Muy cerca (adyacente)
-                # Más peligroso si es parte del cuello/cuerpo cercano
-                proximity_penalty = 0.3 if i <= 3 else 0.5
+            elif distance == 1:  # Muy cerca (adyacente) - MUY PELIGROSO
+                # Penalización más severa para partes cercanas al cuello
+                if i <= 2:  # Cuello inmediato
+                    proximity_penalty = 0.1  # Extremadamente peligroso
+                elif i <= 5:  # Cuerpo cercano
+                    proximity_penalty = 0.2
+                else:  # Cuerpo lejano
+                    proximity_penalty = 0.4
                 danger_factor *= proximity_penalty
-            elif distance == 2:  # Cerca
-                proximity_penalty = 0.6 if i <= 3 else 0.8
+            elif distance == 2:  # Cerca - PELIGROSO
+                if i <= 3:  # Cuello/cuerpo cercano
+                    proximity_penalty = 0.4
+                elif i <= 8:  # Cuerpo medio
+                    proximity_penalty = 0.6
+                else:  # Cuerpo lejano
+                    proximity_penalty = 0.8
                 danger_factor *= proximity_penalty
-            elif distance == 3:  # Moderadamente cerca
-                proximity_penalty = 0.8 if i <= 5 else 0.9
+            elif distance == 3:  # Moderadamente cerca - PRECAUCIÓN
+                if i <= 5:  # Cuerpo cercano
+                    proximity_penalty = 0.7
+                elif i <= 10:  # Cuerpo medio
+                    proximity_penalty = 0.85
+                else:  # Cuerpo lejano
+                    proximity_penalty = 0.95
                 danger_factor *= proximity_penalty
+            elif distance == 4:  # Un poco cerca - PRECAUCIÓN LEVE
+                if i <= 8:  # Solo penalizar cuerpo relativamente cercano
+                    proximity_penalty = 0.9
+                    danger_factor *= proximity_penalty
         
-        return max(0.1, danger_factor)  # Mínimo 0.1 para no ser demasiado restrictivo
+        # Evaluación adicional: detectar patrones de encierro
+        trapped_factor = self._evaluate_trapped_situation(x, y)
+        danger_factor *= trapped_factor
+        
+        return max(0.05, danger_factor)  # Mínimo más bajo para ser más estricto
     
     def _evaluate_escape_routes(self, x, y):
         """
@@ -350,6 +374,70 @@ class SnakeEnvironment:
             escape_factor *= 0.7  # Algo peligroso
         
         return max(0.1, escape_factor)
+    
+    def _evaluate_trapped_situation(self, x, y):
+        """
+        🚨 Evalúa si la serpiente se está metiendo en una trampa mortal
+        Detecta patrones donde la serpiente se encierra a sí misma
+        Retorna factor de trampa (0.0 = trampa mortal, 1.0 = situación segura)
+        """
+        if len(self.snake_positions) <= 6:  # Serpiente pequeña, difícil hacer trampa
+            return 1.0
+        
+        trap_factor = 1.0
+        
+        # Simular los próximos 3-4 movimientos para detectar encierro
+        simulation_positions = [(x, y)]  # Empezar con la nueva posición
+        
+        # Contar cuántas direcciones están bloqueadas por el cuerpo en un radio de 2
+        blocked_area = 0
+        total_area = 0
+        
+        for check_x in range(max(0, x-2), min(GRID_WIDTH, x+3)):
+            for check_y in range(max(0, y-2), min(GRID_HEIGHT, y+3)):
+                total_area += 1
+                if (check_x, check_y) in self.snake_positions:
+                    blocked_area += 1
+        
+        # Si más del 60% del área cercana está bloqueada por el cuerpo, es peligroso
+        if total_area > 0:
+            blocked_ratio = blocked_area / total_area
+            if blocked_ratio > 0.6:
+                trap_factor *= 0.3  # Situación muy peligrosa
+            elif blocked_ratio > 0.4:
+                trap_factor *= 0.6  # Situación peligrosa
+            elif blocked_ratio > 0.25:
+                trap_factor *= 0.8  # Situación de precaución
+        
+        # Detectar si se está formando un "bucle" peligroso
+        # Verificar si hay partes del cuerpo que forman un patrón de encierro
+        head_x, head_y = self.snake_positions[0]
+        body_near_new_pos = []
+        
+        for i, (body_x, body_y) in enumerate(self.snake_positions[1:], 1):
+            distance = abs(x - body_x) + abs(y - body_y)
+            if distance <= 3:  # Cuerpo cercano
+                body_near_new_pos.append((body_x, body_y, i))
+        
+        # Si hay muchas partes del cuerpo cerca, evaluar patrón de encierro
+        if len(body_near_new_pos) >= 4:
+            # Verificar si las partes del cuerpo forman un "anillo" alrededor
+            directions_with_body = set()
+            for body_x, body_y, _ in body_near_new_pos:
+                if body_x < x:
+                    directions_with_body.add('left')
+                elif body_x > x:
+                    directions_with_body.add('right')
+                if body_y < y:
+                    directions_with_body.add('up')
+                elif body_y > y:
+                    directions_with_body.add('down')
+            
+            # Si hay cuerpo en 3 o 4 direcciones, es muy peligroso
+            if len(directions_with_body) >= 3:
+                trap_factor *= 0.2  # Patrón de encierro detectado
+        
+        return max(0.1, trap_factor)
     
     def _calculate_body_avoidance_bonus(self, x, y):
         """

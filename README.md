@@ -85,7 +85,6 @@ python train_agent.py --episodes 1000 --render
 
 **Opciones disponibles:**
 - `--episodes N`: Número de episodios de entrenamiento (default: 1000)
-- `--render`: Mostrar visualización durante entrenamiento
 - `--test modelo.pth`: Probar un modelo pre-entrenado
 - `--test-episodes N`: Número de episodios para prueba (default: 10)
 
@@ -93,16 +92,8 @@ python train_agent.py --episodes 1000 --render
 
 **Entrenamiento con 9 agentes y evolución avanzada:**
 ```bash
-python train_multi_visual.py
+python run_game.py
 ```
-
-**Características del sistema avanzado:**
-- 🏁 **9 agentes compitiendo simultáneamente**
-- ⚡ **Velocidad ajustable**: 1-1200 FPS (botones +/- o ↑↓)
-- 🧬 **Evolución automática**: Cada 50 episodios
-- 🧠 **Red neuronal dinámica**: Muestra el agente con mayor score
-- ⏸️ **Controles interactivos**: ESPACIO (pausa), E (evolución manual)
-
 ### 5. Probar un Modelo Entrenado
 
 ```bash

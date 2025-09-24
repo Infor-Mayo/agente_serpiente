@@ -4,8 +4,8 @@ import time
 import pygame
 import torch
 from enum import Enum
-from snake_env import SnakeEnvironment, GRID_WIDTH, GRID_HEIGHT, CELL_SIZE
-from neural_network import REINFORCEAgent
+from entrenamiento.snake_env import SnakeEnvironment, GRID_WIDTH, GRID_HEIGHT, CELL_SIZE
+from entrenamiento.neural_network import REINFORCEAgent
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
 
