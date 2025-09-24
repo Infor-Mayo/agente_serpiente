@@ -76,6 +76,7 @@ class REINFORCEAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.gamma = gamma
+        self.learning_rate = learning_rate  # Guardar learning_rate como atributo
         
         # Red neuronal de política
         self.policy_net = PolicyNetwork(state_size, action_size=action_size)
