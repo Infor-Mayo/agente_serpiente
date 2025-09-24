@@ -1,19 +1,15 @@
 import pygame
 import random
-import numpy as np
 import sys
+import numpy as np
+
+# Configuración del juego
+GRID_WIDTH = 25
+GRID_HEIGHT = 20
+CELL_SIZE = 25  # Tamaño de cada celda en píxeles (más grande)
 
 # Inicializar pygame
 pygame.init()
-
-# Constantes del juego
-WINDOW_WIDTH = 400
-WINDOW_HEIGHT = 400
-GRID_SIZE = 20
-GRID_WIDTH = WINDOW_WIDTH // GRID_SIZE
-GRID_HEIGHT = WINDOW_HEIGHT // GRID_SIZE
-
-# Colores
 BLACK = (0, 0, 0)
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
@@ -36,22 +32,21 @@ DIRECTION_VECTORS = {
 class SnakeEnvironment:
     def __init__(self, render=False, max_steps=1000, reward_config=None):
         self.render_game = render
-        self.grid_width = GRID_WIDTH
         self.grid_height = GRID_HEIGHT
         self.max_steps = max_steps  # Límite de pasos por episodio (configurable)
         
         # Sistema de recompensas para comportamiento directo y eficiente
-        self.reward_config = reward_config or {
-            'food': 20.0,              # Gran recompensa por comer (objetivo principal)
-            'death': -15.0,            # Castigo fuerte por morir
-            'step': -0.3,              # Presión fuerte por eficiencia
-            'approach': 0.0,           # NO premiar solo acercarse
-            'retreat': -1.0,           # Castigo severo por alejarse
-            'direct_movement': 0.8,    # Premiar movimiento hacia la comida
-            'efficiency_bonus': 2.0,   # Bonus por ruta eficiente
-            'wasted_movement': -0.5    # Castigo por movimientos innecesarios
+        self.reward_config = {
+            'food': 10.0,
+            'death': -10.0,
+            'self_collision': -15.0,  # Penalización específica para auto-colisión
+            'step': -0.1,
+            'approach': 0.5,
+            'retreat': -0.5,
+            'direct_movement': 1.0,
+            'efficiency_bonus': 2.0,
+            'wasted_movement': -0.3
         }
-        
         # Variables para tracking de eficiencia
         self.initial_distance = None
         self.min_distance_achieved = None
@@ -74,14 +69,13 @@ class SnakeEnvironment:
         self.reward_config.update(new_config)
     
     def reset(self):
-        """Reinicia el juego y devuelve el estado inicial"""
-        # Posición inicial de la serpiente (centro del tablero)
         start_x, start_y = GRID_WIDTH // 2, GRID_HEIGHT // 2
         self.snake_positions = [(start_x, start_y)]
         self.direction = RIGHT
         self.score = 0
         self.steps = 0
-        
+        self.done = False
+        self.reset_called = False  # Estado de terminación
         # Generar primera comida
         self._generate_food()
         
@@ -419,6 +413,7 @@ class SnakeEnvironment:
         if (new_head[0] < 0 or new_head[0] >= GRID_WIDTH or 
             new_head[1] < 0 or new_head[1] >= GRID_HEIGHT):
             done = True
+            self.done = True
             reward = self.reward_config['death']
             # No actualizar posición si hay colisión - mantener serpiente en última posición válida
             return self._get_state(), reward, done, {'score': self.score, 'steps': self.steps}
@@ -426,6 +421,7 @@ class SnakeEnvironment:
         # Colisión consigo misma - PENALIZACIÓN ESPECÍFICA
         elif new_head in self.snake_positions:
             done = True
+            self.done = True
             reward = self.reward_config['self_collision']  # 🐍 NUEVA: Penalización específica para auto-colisión
             # No actualizar posición si hay colisión
             return self._get_state(), reward, done, {'score': self.score, 'steps': self.steps}
@@ -487,6 +483,7 @@ class SnakeEnvironment:
         # Terminar si el episodio es muy largo
         if self.steps >= self.max_steps:
             done = True
+            self.done = True
         
         new_state = self._get_state()
         info = {'score': self.score, 'steps': self.steps}
