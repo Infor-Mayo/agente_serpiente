@@ -486,13 +486,8 @@ class SnakeEnvironment:
             if action != opposite_directions.get(self.direction, -1):
                 self.direction = action
             else:
-                # Debug: mostrar cuando se bloquea un retroceso (solo ocasionalmente para no saturar)
-                if self.steps % 50 == 0:  # Solo cada 50 pasos
-                    direction_names = {UP: "UP", DOWN: "DOWN", LEFT: "LEFT", RIGHT: "RIGHT"}
-                    current_dir = direction_names.get(self.direction, "UNKNOWN")
-                    blocked_dir = direction_names.get(action, "UNKNOWN")
-                    print(f"[ENV-BLOQUEO] Retroceso bloqueado: {current_dir} -> {blocked_dir}")
                 # Si intenta retroceder, mantener la dirección actual (ignorar la acción)
+                pass
         else:
             # Si la serpiente solo tiene cabeza, permitir cualquier dirección
             self.direction = action
@@ -517,8 +512,6 @@ class SnakeEnvironment:
             done = True
             self.done = True
             reward = self.reward_config['death']
-            # DEBUG: Reportar colisión con pared
-            print(f"[COLLISION] Serpiente colisionó con pared: {new_head} (límites: 0-{GRID_WIDTH-1}, 0-{GRID_HEIGHT-1})")
             # No actualizar posición si hay colisión - mantener serpiente en última posición válida
             return self._get_state(), reward, done, {'score': self.score, 'steps': self.steps}
         

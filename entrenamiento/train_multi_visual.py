@@ -17,6 +17,12 @@ from neural_network import REINFORCEAgent
 # Importar personalidades desde archivo externo
 from personalities import SNAKE_PERSONALITIES, get_personality_by_index, validate_personalities
 
+# 🚀 PROCESAMIENTO MULTI-NÚCLEO PARA FPS REALES
+import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import threading
+from functools import partial
+
 class MultiAgentVisualTrainer:
     """
     Entrenador con 4 agentes simultáneos y visualización optimizada
@@ -55,6 +61,21 @@ class MultiAgentVisualTrainer:
         # 🎮 CONTROL DE INICIO
         self.training_started = False  # No iniciar automáticamente
         
+        # 🔢 SELECTOR DE CANTIDAD DE AGENTES (3-12)
+        self.num_agents = 12  # Cantidad actual de agentes
+        self.min_agents = 3   # Mínimo permitido
+        self.max_agents = 12  # Máximo permitido
+        
+        # 🚀 CONFIGURACIÓN MULTI-NÚCLEO PARA FPS REALES
+        self.cpu_cores = mp.cpu_count()
+        self.use_multiprocessing = True  # Activar procesamiento paralelo
+        self.process_pool = None  # Pool de procesos reales (no threads)
+        self.batch_size = max(2, self.cpu_cores // 2)  # Procesar en lotes
+        self.ultra_fast_mode = False  # Modo ultra rápido sin renderizado
+        print(f"[MULTI-CORE] Detectados {self.cpu_cores} núcleos de CPU")
+        print(f"[MULTI-CORE] Procesamiento paralelo: {'ACTIVADO' if self.use_multiprocessing else 'DESACTIVADO'}")
+        print(f"[MULTI-CORE] Tamaño de lote: {self.batch_size} agentes por proceso")
+        
         # Colores
         self.BLACK = (0, 0, 0)
         self.WHITE = (255, 255, 255)
@@ -63,6 +84,7 @@ class MultiAgentVisualTrainer:
         self.BLUE = (0, 0, 255)
         self.GRAY = (128, 128, 128)
         self.LIGHT_GRAY = (200, 200, 200)
+        self.DARK_GRAY = (64, 64, 64)
         self.DARK_GREEN = (0, 150, 0)
         self.YELLOW = (255, 255, 0)
         self.ORANGE = (255, 165, 0)
@@ -100,44 +122,13 @@ class MultiAgentVisualTrainer:
         # Cargar personalidades desde el archivo externo
         self.reward_personalities = SNAKE_PERSONALITIES
         
-        # Asignar personalidades a agentes (cada agente tiene su propia configuración)
-        self.agent_personalities = []
-        for i in range(12):
-            self.agent_personalities.append(self.reward_personalities[i].copy())
-        
-        # Configuración global (ya no se usa, cada agente tiene la suya)
-        self.reward_config = self.reward_personalities[0].copy()  # Solo para compatibilidad
-        
-        # 12 Entornos y agentes - cada uno con su personalidad única
-        self.envs = []
-        self.agents = [REINFORCEAgent() for _ in range(12)]
-        self.agent_names = []
-        
-        # Crear entornos con personalidades específicas
-        for i in range(12):
-            personality = self.agent_personalities[i]
-            env = SnakeEnvironment(render=False, max_steps=self.max_steps, reward_config=personality)
-            self.envs.append(env)
-            self.agent_names.append(f"{personality['name']}")  # Usar nombre de personalidad
-            print(f"[INIT] Agente {i+1} ({personality['name']}): Food={personality['food']}, Death={personality['death']}")
-        
-        # Estadísticas por agente
-        self.episode = 0
-        self.agent_scores = [[] for _ in range(12)]
-        self.agent_rewards = [[] for _ in range(12)]
-        self.agent_best_scores = [0] * 12
-        self.current_episode_scores = [0] * 12
-        self.current_episode_rewards = [0] * 12
-        self.current_episode_steps = [0] * 12
-        
-        # Estadísticas adicionales para resumen final
-        self.agent_total_food = [0] * 12  # Total de manzanas comidas
-        self.agent_total_episodes = [0] * 12  # Episodios completados
-        self.agent_best_episode = [0] * 12  # Episodio donde logró mejor score
-        self.training_start_time = None
-        
         # Variables para visualización de red neuronal (agente con mayor score actual)
         self.neural_display_agent = 0  # Agente cuya red neuronal se muestra
+        
+        # Inicializar agentes y entornos con cantidad configurable
+        self._initialize_agents()
+        self.training_start_time = None
+        self.current_training_time = 0  # Tiempo transcurrido en segundos
         self.last_activations = None
         self.last_action = None
         
@@ -147,6 +138,106 @@ class MultiAgentVisualTrainer:
         # Inicializar botones (se actualizarán en update_layout)
         self.buttons = {}
         self.update_layout()
+    
+    def _initialize_agents(self):
+        """Inicializa agentes y entornos según la cantidad configurada"""
+        # Asignar personalidades a agentes (cada agente tiene su propia configuración)
+        self.agent_personalities = []
+        for i in range(self.num_agents):
+            # Usar personalidades cíclicamente si hay más agentes que personalidades
+            personality_idx = i % len(self.reward_personalities)
+            self.agent_personalities.append(self.reward_personalities[personality_idx].copy())
+        
+        # Configuración global (ya no se usa, cada agente tiene la suya)
+        self.reward_config = self.reward_personalities[0].copy()  # Solo para compatibilidad
+        
+        # Crear entornos y agentes según cantidad configurada
+        self.envs = []
+        self.agents = [REINFORCEAgent() for _ in range(self.num_agents)]
+        self.agent_names = []
+        
+        # Crear entornos con personalidades específicas
+        for i in range(self.num_agents):
+            personality = self.agent_personalities[i]
+            env = SnakeEnvironment(render=False, max_steps=self.max_steps, reward_config=personality)
+            self.envs.append(env)
+            self.agent_names.append(f"{personality['name']}")  # Usar nombre de personalidad
+            print(f"[INIT] Agente {i+1} ({personality['name']}): Food={personality['food']}, Death={personality['death']}")
+        
+        # Estadísticas por agente (dinámicas según cantidad)
+        self.episode = 0
+        self.agent_scores = [[] for _ in range(self.num_agents)]
+        self.agent_rewards = [[] for _ in range(self.num_agents)]
+        self.agent_best_scores = [0] * self.num_agents
+        self.current_episode_scores = [0] * self.num_agents
+        self.current_episode_rewards = [0] * self.num_agents
+        self.current_episode_steps = [0] * self.num_agents
+        
+        # Estadísticas adicionales para resumen final
+        self.agent_total_food = [0] * self.num_agents  # Total de manzanas comidas
+        self.agent_total_episodes = [0] * self.num_agents  # Episodios completados
+        self.agent_best_episode = [0] * self.num_agents  # Episodio donde logró mejor score
+        
+        print(f"[CONFIG] Inicializados {self.num_agents} agentes (rango: {self.min_agents}-{self.max_agents})")
+        
+        # Validar que neural_display_agent esté dentro del rango
+        if self.neural_display_agent >= self.num_agents:
+            self.neural_display_agent = 0
+            print(f"[CONFIG] Neural display agent ajustado a agente 1")
+    
+    def _process_agent_batch(self, batch_data):
+        """🚀 Procesa un lote de agentes en paralelo - MÁXIMA EFICIENCIA"""
+        results = []
+        
+        for agent_idx, state, done_flag in batch_data:
+            if done_flag:
+                results.append((agent_idx, None, None, None, None, True))
+                continue
+            
+            try:
+                # Modo ultra rápido: solo acción, sin activaciones ni debug
+                action = self.agents[agent_idx].select_action_fast(state)
+                
+                # Ejecutar acción en el entorno
+                new_state, reward, done, info = self.envs[agent_idx].step(action)
+                
+                # Almacenar recompensa
+                self.agents[agent_idx].store_reward(reward)
+                
+                results.append((agent_idx, new_state, reward, done, info, None))
+                
+            except Exception as e:
+                results.append((agent_idx, state, 0, True, {'score': 0, 'steps': 0}, None))
+        
+        return results
+    
+    def _ultra_fast_step(self, states, done_flags, total_rewards, steps):
+        """🚀 Paso ultra rápido sin renderizado - MÁXIMA VELOCIDAD"""
+        for i in range(self.num_agents):
+            if done_flags[i]:
+                continue
+            
+            # Solo acción, sin activaciones ni debug
+            action = self.agents[i].select_action_fast(states[i])
+            
+            # Ejecutar acción
+            new_state, reward, done, info = self.envs[i].step(action)
+            
+            # Almacenar recompensa
+            self.agents[i].store_reward(reward)
+            
+            # Actualizar estado
+            states[i] = new_state
+            total_rewards[i] += reward
+            steps[i] += 1
+            
+            if done:
+                done_flags[i] = True
+            
+            # Actualizar estadísticas mínimas
+            self.current_episode_scores[i] = info['score']
+            self.current_episode_rewards[i] = total_rewards[i]
+            self.current_episode_steps[i] = steps[i]
     
     def update_layout(self):
         """Actualiza el layout y posiciones según el tamaño de ventana - COMPLETAMENTE RESPONSIVE"""
@@ -230,14 +321,16 @@ class MultiAgentVisualTrainer:
             'steps_up': pygame.Rect(button2_start_x + button2_spacing + 30, row2_y, 25, 20),
             'episodes_down': pygame.Rect(button2_start_x + button2_spacing * 2, row2_y, 25, 20),
             'episodes_up': pygame.Rect(button2_start_x + button2_spacing * 2 + 30, row2_y, 25, 20),
-            'rewards': pygame.Rect(button2_start_x + button2_spacing * 3, row2_y, min(70, button2_spacing - 5), 20),
+            'agents_down': pygame.Rect(button2_start_x + button2_spacing * 3, row2_y, 25, 20),
+            'agents_up': pygame.Rect(button2_start_x + button2_spacing * 3 + 30, row2_y, 25, 20),
+            'rewards': pygame.Rect(button2_start_x + button2_spacing * 4, row2_y, min(70, button2_spacing - 5), 20),
         }
         
-        # Actualizar áreas de agentes con posiciones adaptativas - 12 agentes
+        # Actualizar áreas de agentes con posiciones adaptativas - cantidad dinámica
         self.game_areas = []
         for row in range(agents_rows):
             for col in range(agents_cols):
-                if len(self.game_areas) < 12:  # 12 agentes en total
+                if len(self.game_areas) < self.num_agents:  # Cantidad dinámica de agentes
                     x = agents_start_x + col * agent_spacing_x
                     y = agents_start_y + row * agent_spacing_y
                     self.game_areas.append(pygame.Rect(x, y, agent_size, agent_size))
@@ -291,6 +384,10 @@ class MultiAgentVisualTrainer:
                         self.decrease_episodes()
                     elif self.buttons['episodes_up'].collidepoint(event.pos):
                         self.increase_episodes()
+                    elif self.buttons['agents_down'].collidepoint(event.pos):
+                        self.decrease_agents()
+                    elif self.buttons['agents_up'].collidepoint(event.pos):
+                        self.increase_agents()
                     elif self.buttons['save_models'].collidepoint(event.pos):
                         self.save_models_manual()  # 🆕 GUARDAR MODELOS MANUALMENTE
                     elif self.buttons['load_models'].collidepoint(event.pos):
@@ -434,9 +531,9 @@ class MultiAgentVisualTrainer:
         # Crear timestamp único
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Calcular estadísticas actuales de cada agente (12 agentes)
+        # Calcular estadísticas actuales de cada agente (cantidad dinámica)
         agents_stats = []
-        for i in range(12):
+        for i in range(self.num_agents):
             # Calcular score promedio de los últimos episodios
             recent_scores = self.agent_scores[i][-50:] if len(self.agent_scores[i]) >= 50 else self.agent_scores[i]
             avg_score = sum(recent_scores) / len(recent_scores) if recent_scores else 0
@@ -458,8 +555,9 @@ class MultiAgentVisualTrainer:
         # Ordenar por mejor score individual
         agents_stats.sort(key=lambda x: x['best_score'], reverse=True)
         
-        # Guardar todos los 12 agentes
+        # Guardar TODOS los agentes (cantidad dinámica)
         saved_count = 0
+        print(f"[SAVE] Guardando {len(agents_stats)} agentes...")
         for rank, agent in enumerate(agents_stats):  # Todos los agentes
             try:
                 agent_idx = agent['index']
@@ -514,7 +612,7 @@ class MultiAgentVisualTrainer:
         
         # Calcular estadísticas actuales de cada agente
         agents_stats = []
-        for i in range(9):
+        for i in range(self.num_agents):
             # Calcular score promedio de los últimos episodios
             recent_scores = self.agent_scores[i][-100:] if len(self.agent_scores[i]) >= 100 else self.agent_scores[i]
             avg_score = sum(recent_scores) / len(recent_scores) if recent_scores else 0
@@ -536,8 +634,9 @@ class MultiAgentVisualTrainer:
         # Ordenar por mejor score individual
         agents_stats.sort(key=lambda x: x['best_score'], reverse=True)
         
-        # Guardar TODOS los 9 agentes como checkpoint
+        # Guardar TODOS los agentes como checkpoint (cantidad dinámica)
         saved_count = 0
+        print(f"[CHECKPOINT] Guardando {len(agents_stats)} agentes...")
         for rank, agent in enumerate(agents_stats):  # TODOS los agentes
             try:
                 agent_idx = agent['index']
@@ -926,41 +1025,69 @@ class MultiAgentVisualTrainer:
         return 0
     
     def load_checkpoint_agents(self, episode_data):
-        """Carga todos los agentes de un checkpoint específico"""
+        """Carga agentes de checkpoint con ajuste inteligente de cantidad"""
         import torch
         
         print(f"\n[LOAD] Cargando checkpoint del episodio {episode_data['episode']}...")
         
+        # Obtener modelos disponibles y ordenarlos por score (mejores primero)
+        available_models = sorted(episode_data['agents'], key=lambda x: x.get('score', 0), reverse=True)
+        models_count = len(available_models)
+        current_agents = self.num_agents
+        
+        print(f"[LOAD] Modelos disponibles: {models_count}, Agentes configurados: {current_agents}")
+        
+        # CASO 1: Más modelos que agentes configurados - Tomar los mejores
+        if models_count > current_agents:
+            print(f"[LOAD] Seleccionando los {current_agents} mejores modelos de {models_count} disponibles")
+            selected_models = available_models[:current_agents]
+        
+        # CASO 2: Menos modelos que agentes configurados - Usar todos y crear nuevos
+        elif models_count < current_agents:
+            print(f"[LOAD] Usando {models_count} modelos y creando {current_agents - models_count} nuevos agentes")
+            selected_models = available_models
+        
+        # CASO 3: Cantidad exacta
+        else:
+            print(f"[LOAD] Cantidad exacta: {models_count} modelos para {current_agents} agentes")
+            selected_models = available_models
+        
         loaded_count = 0
-        for agent_data in episode_data['agents']:
+        
+        # Cargar modelos seleccionados
+        for i, agent_data in enumerate(selected_models):
+            if i >= current_agents:  # Seguridad adicional
+                break
+                
             try:
                 # Cargar el modelo
                 checkpoint = torch.load(agent_data['file'], map_location='cpu')
                 
-                # Encontrar el agente correspondiente por nombre
-                agent_idx = -1
-                for i, personality in enumerate(self.agent_personalities):
-                    if personality['name'] == agent_data['name']:
-                        agent_idx = i
-                        break
+                # Cargar directamente en el agente por índice
+                self.agents[i].policy_net.load_state_dict(checkpoint['model_state_dict'])
                 
-                if agent_idx >= 0:
-                    # Cargar el estado del modelo
-                    self.agents[agent_idx].policy_net.load_state_dict(checkpoint['model_state_dict'])
-                    
-                    # Restaurar estadísticas si están disponibles
-                    if 'best_score' in checkpoint:
-                        self.agent_best_scores[agent_idx] = checkpoint['best_score']
-                    if 'best_episode' in checkpoint:
-                        self.agent_best_episode[agent_idx] = checkpoint['best_episode']
-                    
-                    loaded_count += 1
-                    print(f"[LOAD] Agente {agent_data['name']} cargado - Mejor score: {agent_data['score']}")
+                # Restaurar estadísticas si están disponibles
+                if 'best_score' in checkpoint:
+                    self.agent_best_scores[i] = checkpoint['best_score']
+                if 'best_episode' in checkpoint:
+                    self.agent_best_episode[i] = checkpoint['best_episode']
+                
+                loaded_count += 1
+                print(f"[LOAD] Agente {i+1}: {agent_data['name']} cargado - Score: {agent_data.get('score', 0)}")
                 
             except Exception as e:
-                print(f"[ERROR] Error cargando {agent_data['name']}: {e}")
+                print(f"[ERROR] Error cargando agente {i+1} ({agent_data['name']}): {e}")
         
-        print(f"\n[LOAD] {loaded_count} agentes cargados exitosamente!")
+        # Si hay menos modelos que agentes, los restantes quedan con pesos aleatorios
+        if models_count < current_agents:
+            new_agents = current_agents - models_count
+            print(f"[LOAD] {new_agents} agentes restantes mantienen pesos aleatorios iniciales")
+            for i in range(models_count, current_agents):
+                print(f"[LOAD] Agente {i+1}: Nuevo agente con pesos aleatorios")
+        
+        print("="*60)
+        print(f"[LOAD] {loaded_count}/{current_agents} agentes cargados exitosamente!")
+        print(f"[INFO] Configuración ajustada automáticamente para {current_agents} agentes")
         print(f"[INFO] Puedes continuar el entrenamiento desde este punto")
         print("="*60)
     
@@ -977,7 +1104,7 @@ class MultiAgentVisualTrainer:
         print("="*80)
         
         # Información general
-        print(f"Tiempo de entrenamiento: {timedelta(seconds=int(training_time))}")
+        print(f"🕒 Tiempo de entrenamiento: {timedelta(seconds=int(training_time))} ({self.format_training_time()})")
         print(f"Episodios completados: {self.episode}")
         if self.max_episodes != float('inf'):
             print(f"Progreso: {self.episode}/{self.max_episodes} ({100*self.episode/self.max_episodes:.1f}%)")
@@ -986,7 +1113,7 @@ class MultiAgentVisualTrainer:
         
         # Crear ranking de agentes (12 agentes)
         agent_stats = []
-        for i in range(12):
+        for i in range(self.num_agents):
             total_episodes = len(self.agent_scores[i])
             total_food = sum(self.agent_scores[i])
             avg_score = total_food / max(total_episodes, 1)
@@ -1092,13 +1219,45 @@ class MultiAgentVisualTrainer:
             self.max_episodes = episode_increments[current_idx - 1]
             print(f"[CONFIG] Tope de episodios reducido a: {self.max_episodes}")
     
+    def increase_agents(self):
+        """Aumenta la cantidad de agentes (máximo 12) - Solo antes del entrenamiento"""
+        if self.training_started:
+            print(f"[CONFIG] No se puede cambiar la cantidad de agentes durante el entrenamiento")
+            return
+            
+        if self.num_agents < self.max_agents:
+            self.num_agents += 1
+            print(f"[CONFIG] Cantidad de agentes aumentada a: {self.num_agents}")
+            # Reinicializar agentes con nueva cantidad
+            self._initialize_agents()
+            # Actualizar layout para reflejar cambios
+            self.update_layout()
+        else:
+            print(f"[CONFIG] Ya tienes el máximo de agentes ({self.max_agents})")
+    
+    def decrease_agents(self):
+        """Disminuye la cantidad de agentes (mínimo 3) - Solo antes del entrenamiento"""
+        if self.training_started:
+            print(f"[CONFIG] No se puede cambiar la cantidad de agentes durante el entrenamiento")
+            return
+            
+        if self.num_agents > self.min_agents:
+            self.num_agents -= 1
+            print(f"[CONFIG] Cantidad de agentes reducida a: {self.num_agents}")
+            # Reinicializar agentes con nueva cantidad
+            self._initialize_agents()
+            # Actualizar layout para reflejar cambios
+            self.update_layout()
+        else:
+            print(f"[CONFIG] Ya tienes el mínimo de agentes ({self.min_agents})")
+    
     def evolve_agents(self):
         """Sistema de evolución avanzado con múltiples criterios y diversidad genética"""
         print(f"\n[EVOLUCION] INICIANDO EVOLUCION GENERACION {self.episode // 50}")
         
         # Calcular fitness multi-criterio para cada agente
         fitness_scores = []
-        for i in range(12):
+        for i in range(self.num_agents):
             fitness = self.calculate_advanced_fitness(i)
             fitness_scores.append(fitness)
             print(f"Agente {i+1}: Fitness = {fitness:.3f}")
@@ -1176,7 +1335,7 @@ class MultiAgentVisualTrainer:
         
         # Generar todos los demás agentes (posiciones que NO son élites) a partir de los 2 élites
         # Identificar qué posiciones NO son élites
-        non_elite_positions = [i for i in range(12) if i not in elite_indices]
+        non_elite_positions = [i for i in range(self.num_agents) if i not in elite_indices]
         
         print(f"   [INFO] Generando {len(non_elite_positions)} agentes desde élites {elite_list}")
         
@@ -1224,7 +1383,7 @@ class MultiAgentVisualTrainer:
             saved_states.append(agent.policy_net.state_dict().copy())
         
         # Recrear todos los agentes desde cero
-        for i in range(12):
+        for i in range(self.num_agents):
             # Crear nuevo agente
             new_agent = REINFORCEAgent(
                 state_size=62, 
@@ -1287,7 +1446,7 @@ class MultiAgentVisualTrainer:
         best_score = -1
         best_agent = 0
         
-        for i in range(12):
+        for i in range(self.num_agents):
             if not done_flags[i]:  # Solo agentes vivos
                 current_score = self.current_episode_scores[i]
                 if current_score > best_score:
@@ -1301,7 +1460,22 @@ class MultiAgentVisualTrainer:
         # Cambiar solo si es diferente
         if self.neural_display_agent != best_agent:
             self.neural_display_agent = best_agent
-            print(f"Cambiando visualización de red neuronal a Agente {best_agent + 1} (Score: {best_score})")
+    
+    def update_training_time(self):
+        """🕒 Actualiza el tiempo transcurrido de entrenamiento"""
+        if self.training_start_time:
+            self.current_training_time = time.time() - self.training_start_time
+    
+    def format_training_time(self):
+        """🕒 Formatea el tiempo transcurrido en formato legible HH:MM:SS"""
+        if self.current_training_time == 0:
+            return "00:00:00"
+        
+        hours = int(self.current_training_time // 3600)
+        minutes = int((self.current_training_time % 3600) // 60)
+        seconds = int(self.current_training_time % 60)
+        
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     
     def draw_controls(self):
         """Dibuja los controles organizados en 2 filas con etiquetas"""
@@ -1395,6 +1569,22 @@ class MultiAgentVisualTrainer:
         episodes_up_rect = episodes_up_text.get_rect(center=self.buttons['episodes_up'].center)
         self.screen.blit(episodes_up_text, episodes_up_rect)
         
+        # Botones de agentes (deshabilitados durante entrenamiento)
+        agents_color = self.GRAY if self.training_started else self.ORANGE
+        text_color = self.DARK_GRAY if self.training_started else self.WHITE
+        
+        pygame.draw.rect(self.screen, agents_color, self.buttons['agents_down'])
+        pygame.draw.rect(self.screen, self.BLACK, self.buttons['agents_down'], 1)
+        agents_down_text = self.font_small.render("-", True, text_color)
+        agents_down_rect = agents_down_text.get_rect(center=self.buttons['agents_down'].center)
+        self.screen.blit(agents_down_text, agents_down_rect)
+        
+        pygame.draw.rect(self.screen, agents_color, self.buttons['agents_up'])
+        pygame.draw.rect(self.screen, self.BLACK, self.buttons['agents_up'], 1)
+        agents_up_text = self.font_small.render("+", True, text_color)
+        agents_up_rect = agents_up_text.get_rect(center=self.buttons['agents_up'].center)
+        self.screen.blit(agents_up_text, agents_up_rect)
+        
         # Botón de guardar modelos
         pygame.draw.rect(self.screen, (0, 150, 0), self.buttons['save_models'])  # Verde
         pygame.draw.rect(self.screen, self.BLACK, self.buttons['save_models'], 1)
@@ -1435,6 +1625,16 @@ class MultiAgentVisualTrainer:
             label_y = max(self.buttons['episodes_down'].y - 15, self.controls_area.y + 53)
             self.screen.blit(episodes_label, (episodes_center_x - episodes_label.get_width()//2, label_y))
         
+        if 'agents_down' in self.buttons and 'agents_up' in self.buttons:
+            # Etiqueta con estado (bloqueado durante entrenamiento)
+            if self.training_started:
+                agents_label = self.font_small.render("Agentes (Bloqueado)", True, self.DARK_GRAY)
+            else:
+                agents_label = self.font_small.render("Agentes", True, self.BLACK)
+            agents_center_x = (self.buttons['agents_down'].x + self.buttons['agents_up'].x + self.buttons['agents_up'].width) // 2
+            label_y = max(self.buttons['agents_down'].y - 15, self.controls_area.y + 53)
+            self.screen.blit(agents_label, (agents_center_x - agents_label.get_width()//2, label_y))
+        
         # Información (ajustada para no salir de ventana)
         current_speed = self.speed_options[self.current_speed_index]
         current_personality = self.agent_personalities[self.neural_display_agent]
@@ -1444,6 +1644,7 @@ class MultiAgentVisualTrainer:
             f"Vel: {current_speed}",
             f"Ep: {self.episode}/{self.max_episodes}",
             f"Steps: {self.max_steps}",
+            f"Agentes: {self.num_agents}",
             f"Red: {current_personality['name'][:8]}"  # Truncar nombre largo
         ]
         
@@ -1709,6 +1910,7 @@ class MultiAgentVisualTrainer:
         # Información de configuración actual (espaciado corregido)
         current_personality = self.agent_personalities[self.neural_display_agent]
         config_lines = [
+            f"🕒 Tiempo: {self.format_training_time()}",
             f"Episodio: {self.episode} / {self.max_episodes}",
             f"Steps Max: {self.max_steps}",
             f"Red Neuronal: {current_personality['name']}",
@@ -1735,8 +1937,8 @@ class MultiAgentVisualTrainer:
         y_start = self.stats_area.y + 25
         agent_width = min(280, (self.stats_area.width - 20) // 4)  # Ancho adaptativo para 4 columnas
         
-        for i in range(12):
-            # Determinar posición en grid 4x3
+        for i in range(self.num_agents):
+            # Determinar posición en grid adaptativo
             col = i % 4
             row = i // 4
             x_pos = self.stats_area.x + 10 + col * agent_width
@@ -1784,7 +1986,7 @@ class MultiAgentVisualTrainer:
         # Dibujar progreso de cada agente
         max_episodes = max(len(scores) for scores in self.agent_scores)
         if max_episodes > 1:
-            for i in range(9):
+            for i in range(self.num_agents):
                 if len(self.agent_scores[i]) > 1:
                     scores = self.agent_scores[i][-50:]  # Últimos 50
                     if len(scores) < 2:
@@ -1804,7 +2006,7 @@ class MultiAgentVisualTrainer:
                         pygame.draw.lines(self.screen, self.agent_colors[i], False, points, line_width)
     
     def train_episode(self):
-        """Entrena un episodio con los 12 agentes"""
+        """Entrena un episodio con cantidad dinámica de agentes"""
         # Si el entrenamiento no ha iniciado, solo manejar eventos y renderizar
         if not self.training_started:
             # Manejar eventos
@@ -1832,14 +2034,14 @@ class MultiAgentVisualTrainer:
         
         # Reiniciar todos los entornos
         states = [env.reset() for env in self.envs]
-        total_rewards = [0] * 12
-        steps = [0] * 12
-        done_flags = [False] * 12
+        total_rewards = [0] * self.num_agents
+        steps = [0] * self.num_agents
+        done_flags = [False] * self.num_agents
         
         # Reiniciar estadísticas del episodio
-        self.current_episode_scores = [0] * 12
-        self.current_episode_rewards = [0] * 12
-        self.current_episode_steps = [0] * 12
+        self.current_episode_scores = [0] * self.num_agents
+        self.current_episode_rewards = [0] * self.num_agents
+        self.current_episode_steps = [0] * self.num_agents
         
         while not all(done_flags):
             # Manejar eventos
@@ -1860,98 +2062,127 @@ class MultiAgentVisualTrainer:
             # Actualizar qué agente mostrar en la red neuronal
             self.update_neural_display_agent(done_flags)
             
-            # Procesar cada agente
-            for i in range(12):
-                if done_flags[i]:
-                    continue
-                
-                # 🚀 PROCESAMIENTO OPTIMIZADO
-                # Seleccionar acción (sin activaciones innecesarias en modo turbo)
-                if self.fast_mode and i != self.neural_display_agent:
-                    # Modo rápido: solo acción, sin activaciones
-                    action = self.agents[i].select_action_fast(states[i])
-                else:
-                    # Modo normal: con activaciones para visualización
-                    action, activations = self.agents[i].select_action(states[i])
+            # 🕒 Actualizar tiempo transcurrido de entrenamiento
+            self.update_training_time()
+            
+            # 🚀 PROCESAMIENTO OPTIMIZADO PERO SIEMPRE CON RENDERIZADO COMPLETO
+            self.ultra_fast_mode = False  # SIEMPRE mostrar renderizado completo
+            
+            if self.current_speed_index >= 8:  # Velocidades altas (240+ FPS)
+                # Modo rápido optimizado: procesamiento ultra rápido pero renderizado completo
+                for i in range(self.num_agents):
+                    if done_flags[i]:
+                        continue
+                    
+                    # OPTIMIZACIÓN: Solo el agente neural display necesita activaciones
                     if i == self.neural_display_agent:
-                        # Obtener activaciones reales de la red neuronal
+                        # SIEMPRE con activaciones para visualización neuronal
+                        action, activations = self.agents[i].select_action(states[i])
                         self.last_activations = self.get_real_activations(i, states[i])
                         self.last_action = action
-                
-                # Ejecutar acción
-                new_state, reward, done, info = self.envs[i].step(action)
-                
-                # 🔧 CRÍTICO: Guardar recompensa para REINFORCE
-                self.agents[i].store_reward(reward)
-                
-                # Debug para verificar aprendizaje
-                if i == 0 and steps[i] % 50 == 0:  # Solo agente 0, cada 50 steps
-                    print(f"[DEBUG] Agente 1 - Step {steps[i]}: reward={reward:.2f}, total={total_rewards[i]:.2f}")
-                
-                # Actualizar
-                states[i] = new_state
-                total_rewards[i] += reward
-                steps[i] += 1
-                
-                if done:
-                    done_flags[i] = True
-                
-                # Actualizar estadísticas actuales
-                self.current_episode_scores[i] = info['score']
-                self.current_episode_rewards[i] = total_rewards[i]
-                self.current_episode_steps[i] = steps[i]
+                    else:
+                        # Acción ultra rápida para todos los demás
+                        action = self.agents[i].select_action_fast(states[i])
+                    
+                    # Ejecutar acción
+                    new_state, reward, done, info = self.envs[i].step(action)
+                    
+                    # Guardar recompensa
+                    self.agents[i].store_reward(reward)
+                    
+                    # Actualizar estado (sin debug para velocidad)
+                    states[i] = new_state
+                    total_rewards[i] += reward
+                    steps[i] += 1
+                    
+                    if done:
+                        done_flags[i] = True
+                    
+                    # Actualizar estadísticas
+                    self.current_episode_scores[i] = info['score']
+                    self.current_episode_rewards[i] = total_rewards[i]
+                    self.current_episode_steps[i] = steps[i]
+                    
+            else:
+                # 🐌 PROCESAMIENTO NORMAL (velocidades bajas)
+                self.ultra_fast_mode = False
+                for i in range(self.num_agents):
+                    if done_flags[i]:
+                        continue
+                    
+                    # OPTIMIZACIÓN: Solo el agente neural display necesita activaciones completas
+                    if i == self.neural_display_agent:
+                        # SIEMPRE con activaciones para visualización neuronal
+                        action, activations = self.agents[i].select_action(states[i])
+                        self.last_activations = self.get_real_activations(i, states[i])
+                        self.last_action = action
+                    else:
+                        # TODOS los demás agentes usan acción rápida para velocidad
+                        action = self.agents[i].select_action_fast(states[i])
+                    
+                    # Ejecutar acción
+                    new_state, reward, done, info = self.envs[i].step(action)
+                    
+                    # Guardar recompensa
+                    self.agents[i].store_reward(reward)
+                    
+                    # Debug eliminado para máxima velocidad
+                    
+                    # Actualizar
+                    states[i] = new_state
+                    total_rewards[i] += reward
+                    steps[i] += 1
+                    
+                    if done:
+                        done_flags[i] = True
+                    
+                    # Actualizar estadísticas
+                    self.current_episode_scores[i] = info['score']
+                    self.current_episode_rewards[i] = total_rewards[i]
+                    self.current_episode_steps[i] = steps[i]
             
-            # Dibujar todo
+            # 🎨 RENDERIZADO COMPLETO SIEMPRE - SIN PARPADEOS, TODO VISIBLE
+            # SIEMPRE dibujar todo para evitar parpadeos
             self.screen.fill(self.BLACK)
             
-            for i in range(12):
+            # SIEMPRE mostrar todos los juegos de agentes
+            for i in range(self.num_agents):
                 if not done_flags[i]:
                     self.draw_game(i, states[i], {'score': self.envs[i].score, 'steps': steps[i]})
             
-            # Mostrar red neuronal del agente seleccionado
+            # SIEMPRE mostrar red neuronal (ACTIVACIONES SIEMPRE VISIBLES)
             if not done_flags[self.neural_display_agent] and hasattr(self, 'last_activations') and self.last_activations:
                 self.draw_neural_network_simple(self.last_activations, self.last_action)
             
-            # 🚀 RENDERIZADO CONDICIONAL PARA VELOCIDAD EXTREMA
-            if should_render:
-                # 🎨 Dibujar todos los paneles por separado (diseño mejorado)
-                self.draw_training_info()      # Panel de control (lado derecho)
-                self.draw_agent_stats()        # Estadísticas de agentes (lado izquierdo)
-                self.draw_progress_graph()     # Gráfico de progreso (separado)
-                self.draw_controls()           # Controles (parte inferior)
-                
-                pygame.display.flip()
+            # SIEMPRE mostrar TODOS los paneles (sin parpadeos)
+            self.draw_training_info()      # Panel de control (lado derecho)
+            self.draw_agent_stats()        # Estadísticas de agentes (lado izquierdo)
+            self.draw_progress_graph()     # Gráfico de progreso (separado)
+            self.draw_controls()           # Controles (parte inferior)
             
-            # Control de velocidad CONSTANTE - EXACTAMENTE la configurada por botones
+            # SIEMPRE actualizar pantalla completa
+            pygame.display.flip()
+            
+            # Control de velocidad CONSTANTE - EXACTAMENTE la configurada por el usuario
             current_speed = self.speed_options[self.current_speed_index]
             if self.fast_mode:
                 # En modo turbo, no limitar FPS con clock.tick()
                 pass  # Máxima velocidad posible
             else:
-                # COMPENSAR por menos serpientes activas para mantener velocidad uniforme
-                active_agents = sum(1 for flag in done_flags if not flag)
-                
-                # Agregar delay compensatorio cuando hay menos serpientes
-                if active_agents < 12:
-                    import time
-                    # Compensación proporcional al trabajo faltante
-                    compensation_factor = (12 - active_agents) / 12.0
-                    base_delay = 1.0 / current_speed  # Tiempo base por frame
-                    compensation_delay = base_delay * compensation_factor * 0.1  # 10% de compensación
-                    time.sleep(compensation_delay)
-                
-                # VELOCIDAD CONSTANTE - exactamente la configurada
+                # VELOCIDAD CONSTANTE - exactamente la configurada por el usuario
                 self.clock.tick(current_speed)
         
         # Finalizar episodios y actualizar estadísticas
         losses = []
-        for i in range(12):
+        for i in range(self.num_agents):
             loss = self.agents[i].finish_episode(total_rewards[i], steps[i])
             losses.append(loss)
             
-            # Debug del entrenamiento
+            # Debug del entrenamiento mejorado
             if i == 0:  # Solo agente 0
-                print(f"[TRAIN] Episodio {self.episode} - Agente 1: Loss={loss:.4f}, Reward={total_rewards[i]:.2f}, Steps={steps[i]}")
+                rewards_len = len(self.agents[i].rewards) if hasattr(self.agents[i], 'rewards') else 0
+                log_probs_len = len(self.agents[i].log_probs) if hasattr(self.agents[i], 'log_probs') else 0
+                print(f"[TRAIN] Ep {self.episode} - Agente 1: Loss={loss:.4f}, TotalReward={total_rewards[i]:.2f}, Steps={steps[i]}, RewardsStored={rewards_len}, LogProbs={log_probs_len}")
             
             # Actualizar estadísticas
             score = self.envs[i].score
@@ -2044,13 +2275,18 @@ class MultiAgentVisualTrainer:
         # Mostrar resumen final
         self.show_final_summary()
         
+        # Limpiar process pool
+        if self.process_pool:
+            self.process_pool.shutdown(wait=True)
+            print("[MULTI-CORE] Process pool cerrado")
+        
         pygame.quit()
         print("Entrenamiento completado!")
     
     def update_best_agent(self):
         """Actualiza cuál es el mejor agente para evolución"""
         recent_scores = []
-        for i in range(9):
+        for i in range(self.num_agents):
             if len(self.agent_scores[i]) >= 10:
                 recent = self.agent_scores[i][-10:]
                 recent_scores.append(np.mean(recent))
@@ -2070,7 +2306,7 @@ class MultiAgentVisualTrainer:
         print("="*80)
         
         # Información general
-        print(f"Tiempo total de entrenamiento: {datetime.timedelta(seconds=int(training_time))}")
+        print(f"🕒 Tiempo total de entrenamiento: {datetime.timedelta(seconds=int(training_time))} ({self.format_training_time()})")
         print(f"Episodios completados: {self.episode}")
         print(f"Configuracion de recompensas utilizada:")
         print(f"   • Food: {self.reward_config['food']}")
@@ -2078,9 +2314,9 @@ class MultiAgentVisualTrainer:
         print(f"   • Direct Movement: {self.reward_config['direct_movement']}")
         print(f"   • Efficiency Bonus: {self.reward_config['efficiency_bonus']}")
         
-        # Crear ranking de agentes (12 agentes)
+        # Crear ranking de agentes (cantidad dinámica)
         agent_stats = []
-        for i in range(12):
+        for i in range(self.num_agents):
             total_episodes = len(self.agent_scores[i])
             total_food = sum(self.agent_scores[i])
             avg_score = total_food / max(total_episodes, 1)
