@@ -390,9 +390,23 @@ class SnakeEnvironment:
         """
         self.steps += 1
         
-        # Cambiar dirección (evitar movimiento opuesto)
+        # 🚫 BLOQUEO DE RETROCESO: No permitir movimiento opuesto
         opposite_directions = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
-        if action != opposite_directions.get(self.direction, -1):
+        
+        # Solo cambiar dirección si NO es la opuesta a la actual
+        if len(self.snake_positions) > 1:  # Solo aplicar si la serpiente tiene cuerpo
+            if action != opposite_directions.get(self.direction, -1):
+                self.direction = action
+            else:
+                # Debug: mostrar cuando se bloquea un retroceso (solo ocasionalmente para no saturar)
+                if self.steps % 50 == 0:  # Solo cada 50 pasos
+                    direction_names = {UP: "UP", DOWN: "DOWN", LEFT: "LEFT", RIGHT: "RIGHT"}
+                    current_dir = direction_names.get(self.direction, "UNKNOWN")
+                    blocked_dir = direction_names.get(action, "UNKNOWN")
+                    print(f"[ENV-BLOQUEO] Retroceso bloqueado: {current_dir} -> {blocked_dir}")
+                # Si intenta retroceder, mantener la dirección actual (ignorar la acción)
+        else:
+            # Si la serpiente solo tiene cabeza, permitir cualquier dirección
             self.direction = action
         
         # Mover serpiente

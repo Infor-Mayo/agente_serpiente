@@ -16,6 +16,8 @@ class GameMode(Enum):
     IA_VS_IA = 3
     SOLO_IA = 4
     GAME_OVER = 5
+    PAUSED = 6
+    CONFIG = 7
 
 PLAYER_COLORS = [
     (0, 255, 0),   # Humano - Verde
@@ -24,6 +26,11 @@ PLAYER_COLORS = [
     (255, 255, 0), # IA 3 - Amarillo
     (255, 0, 255), # IA 4 - Magenta
     (0, 255, 255), # IA 5 - Cyan
+    (255, 128, 0), # IA 6 - Naranja
+    (128, 255, 0), # IA 7 - Verde Lima
+    (255, 128, 128), # IA 8 - Rosa
+    (128, 128, 255), # IA 9 - Azul Claro
+    (255, 255, 128), # IA 10 - Amarillo Claro
 ]
 
 def load_models():
