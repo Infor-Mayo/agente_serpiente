@@ -517,6 +517,8 @@ class SnakeEnvironment:
             done = True
             self.done = True
             reward = self.reward_config['death']
+            # DEBUG: Reportar colisión con pared
+            print(f"[COLLISION] Serpiente colisionó con pared: {new_head} (límites: 0-{GRID_WIDTH-1}, 0-{GRID_HEIGHT-1})")
             # No actualizar posición si hay colisión - mantener serpiente en última posición válida
             return self._get_state(), reward, done, {'score': self.score, 'steps': self.steps}
         
@@ -539,6 +541,15 @@ class SnakeEnvironment:
         else:
             self.snake_positions.insert(0, new_head)
             self.snake_positions.pop()  # Remover cola
+            
+            # VERIFICACIÓN DE SEGURIDAD: Asegurar que la cabeza esté dentro de límites
+            head = self.snake_positions[0]
+            if not (0 <= head[0] < GRID_WIDTH and 0 <= head[1] < GRID_HEIGHT):
+                print(f"[ERROR CRÍTICO] Serpiente fuera de límites después de movimiento: {head}")
+                done = True
+                self.done = True
+                reward = self.reward_config['death']
+                return self._get_state(), reward, done, {'score': self.score, 'steps': self.steps}
             
             # Recompensas por movimiento
             reward += self.reward_config['step']
