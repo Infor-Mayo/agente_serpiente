@@ -1651,7 +1651,16 @@ class MultiAgentVisualTrainer:
         # Panel de detalles (lado derecho de la pantalla)
         panel_width = 350
         panel_height = 600
-        panel_x = WINDOW_WIDTH - panel_width - 10
+        screen_width = self.screen.get_width()
+        screen_height = self.screen.get_height()
+        
+        # Ajustar dimensiones si la pantalla es muy pequeña
+        if panel_width > screen_width - 20:
+            panel_width = screen_width - 20
+        if panel_height > screen_height - 100:
+            panel_height = screen_height - 100
+            
+        panel_x = screen_width - panel_width - 10
         panel_y = 50
         
         # Fondo del panel con transparencia
