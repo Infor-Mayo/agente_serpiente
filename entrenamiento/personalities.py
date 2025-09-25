@@ -289,6 +289,19 @@ SNAKE_PERSONALITIES = [
         'efficiency_bonus': 9.0,
         'wasted_movement': -0.6,
         'description': 'Alquimista que transforma riesgos en oportunidades.'
+    },
+    {
+        'name': 'Experimental',
+        'food': 10.0,
+        'death': -10.0,
+        'self_collision': -15.0,
+        'step': -0.01,
+        'approach': 0.0,
+        'retreat': -0.0,
+        'direct_movement': 0.0,
+        'efficiency_bonus': 0.0,
+        'wasted_movement': -0.0,
+        'description': 'Personalidad experimental con valores de prueba específicos.'
     }
 ]
 

@@ -1958,33 +1958,29 @@ class MultiAgentVisualTrainer:
     
     def assign_random_personalities(self):
         """🎲 Asigna personalidades aleatorias sin repetición a los agentes"""
-        print(f"\n[PERSONALIDADES] Asignando personalidades aleatorias para {self.num_agents} agentes...")
+        print(f"\n[PERSONALIDADES] 🧪 MODO EXPERIMENTAL: Asignando personalidad 'Experimental' a TODOS los {self.num_agents} agentes...")
         
-        # Obtener personalidades disponibles (las que no han sido usadas)
-        available_personalities = []
+        # 🧪 EXPERIMENTAL: Buscar la personalidad "Experimental"
+        experimental_personality = None
+        experimental_idx = None
+        
         for i, personality in enumerate(self.reward_personalities):
-            if i not in self.used_personalities:
-                available_personalities.append((i, personality))
+            if personality['name'] == 'Experimental':
+                experimental_personality = personality
+                experimental_idx = i
+                break
         
-        # Si no hay suficientes personalidades disponibles, resetear
-        if len(available_personalities) < self.num_agents:
-            print(f"[PERSONALIDADES] Solo {len(available_personalities)} personalidades disponibles para {self.num_agents} agentes")
-            print(f"[PERSONALIDADES] Reseteando personalidades usadas para permitir reutilización")
-            self.used_personalities.clear()
-            available_personalities = [(i, personality) for i, personality in enumerate(self.reward_personalities)]
+        if experimental_personality is None:
+            print("[ERROR] No se encontró la personalidad 'Experimental'")
+            return
         
-        # Seleccionar personalidades aleatorias sin repetición
-        import random
-        selected_personalities = random.sample(available_personalities, self.num_agents)
+        # Asignar la personalidad "Experimental" a TODOS los agentes
+        for agent_idx in range(self.num_agents):
+            self.personality_assignments[agent_idx] = experimental_idx
+            print(f"[PERSONALIDADES] Agente {agent_idx+1}: {experimental_personality['name']} (ID: {experimental_idx}) - Food={experimental_personality['food']}, Death={experimental_personality['death']}, Step={experimental_personality['step']}")
         
-        # Asignar personalidades a agentes
-        for agent_idx, (personality_idx, personality) in enumerate(selected_personalities):
-            self.personality_assignments[agent_idx] = personality_idx
-            self.used_personalities.add(personality_idx)
-            print(f"[PERSONALIDADES] Agente {agent_idx+1}: {personality['name']} (ID: {personality_idx})")
-        
-        print(f"[PERSONALIDADES] Personalidades asignadas exitosamente!")
-        print(f"[PERSONALIDADES] Personalidades usadas en esta sesión: {len(self.used_personalities)}/24")
+        print(f"[PERSONALIDADES] 🧪 TODOS los agentes configurados con personalidad EXPERIMENTAL!")
+        print(f"[PERSONALIDADES] Valores de prueba: Food=+{experimental_personality['food']}, Death={experimental_personality['death']}, Step={experimental_personality['step']}")
     
     def get_agent_personality(self, agent_idx):
         """🎭 Obtiene la personalidad asignada a un agente específico"""
