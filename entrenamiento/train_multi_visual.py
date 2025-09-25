@@ -68,9 +68,9 @@ class MultiAgentVisualTrainer:
         # 🎮 CONTROL DE INICIO
         self.training_started = False  # No iniciar automáticamente
         
-        # 🔢 SELECTOR DE CANTIDAD DE AGENTES (3-12)
+        # 🔢 SELECTOR DE CANTIDAD DE AGENTES (2-12)
         self.num_agents = 12  # Cantidad actual de agentes
-        self.min_agents = 3   # Mínimo permitido
+        self.min_agents = 2   # Mínimo permitido
         self.max_agents = 12  # Máximo permitido
         
         # 🚀 CONFIGURACIÓN MULTI-NÚCLEO PARA FPS REALES
@@ -1809,6 +1809,137 @@ class MultiAgentVisualTrainer:
                 text = self.font_small.render(line, True, color)
                 self.screen.blit(text, (area.x + 10, y_offset + i * line_height))
     
+    def draw_agent_details_compact(self):
+        """🔍 Dibuja datos compactos del agente seleccionado al lado de las activaciones"""
+        if self.selected_agent is None:
+            return
+        
+        agent_idx = self.selected_agent
+        agent = self.agents[agent_idx]
+        personality = self.agent_personalities[agent_idx]
+        
+        # Área disponible al lado derecho de las activaciones neurales
+        area = self.neural_area
+        start_x = area.x + area.width // 2 + 20  # Lado derecho
+        start_y = area.y + 50
+        line_height = 16
+        
+        # Información compacta
+        info_lines = [
+            f"AGENTE {agent_idx + 1}: {personality['name']}",
+            f"Score: {self.current_episode_scores[agent_idx]}",
+            f"Steps: {self.current_episode_steps[agent_idx]}",
+            f"Reward: {self.current_episode_rewards[agent_idx]:.1f}",
+            f"Episodios: {len(agent.episode_rewards)}",
+            "",
+            "RECOMPENSAS:",
+            f"Comida: +{personality['food']:.0f}",
+            f"Muerte: {personality['death']:.0f}",
+            f"Paso: {personality['step']:+.2f}",
+            f"Acercar: +{personality['approach']:.1f}",
+            f"Alejar: {personality['retreat']:.1f}",
+            "",
+            "RED NEURONAL:",
+            f"Epsilon: {agent.epsilon:.3f}",
+            f"Exp: {len(agent.rewards)}",
+            f"Estados: {len(agent.states)}",
+        ]
+        
+        # Dibujar información compacta
+        for i, line in enumerate(info_lines):
+            y_pos = start_y + i * line_height
+            if y_pos > area.y + area.height - 60:  # No sobrepasar el área
+                break
+            
+            color = self.BLACK
+            if line.startswith("AGENTE"):
+                color = self.agent_colors[agent_idx]
+            elif line.endswith(":"):
+                color = (100, 100, 100)
+            elif ":" in line and line != "":
+                color = (60, 60, 60)
+            
+            if line != "":  # No dibujar líneas vacías
+                text = self.font_small.render(line, True, color)
+                # Verificar que no se salga del área
+                if start_x + text.get_width() < area.x + area.width - 5:
+                    self.screen.blit(text, (start_x, y_pos))
+    
+    def draw_agent_details_side_panel(self):
+        """🔍 Dibuja datos del agente seleccionado integrados al lado del panel de control"""
+        if self.selected_agent is None:
+            return
+        
+        agent_idx = self.selected_agent
+        agent = self.agents[agent_idx]
+        personality = self.agent_personalities[agent_idx]
+        
+        # Usar área al lado del panel de control, integrado en la interfaz
+        start_x = self.info_area.x + self.info_area.width + 20
+        start_y = self.info_area.y + 10
+        panel_width = 280
+        panel_height = 350
+        
+        # Verificar que no se salga de la pantalla
+        screen_width = self.screen.get_width()
+        if start_x + panel_width > screen_width:
+            start_x = screen_width - panel_width - 10
+        
+        # Fondo visible para que se distingan los datos
+        panel_rect = pygame.Rect(start_x - 10, start_y - 5, panel_width, panel_height)
+        pygame.draw.rect(self.screen, (50, 50, 50), panel_rect)  # Fondo gris oscuro
+        pygame.draw.rect(self.screen, self.agent_colors[agent_idx], panel_rect, 2)  # Borde del color del agente
+        
+        # Título integrado
+        title = self.font_large.render(f"AGENTE {agent_idx + 1}", True, self.agent_colors[agent_idx])
+        self.screen.blit(title, (start_x, start_y))
+        
+        # Información del agente
+        y_offset = start_y + 30
+        line_height = 16
+        
+        info_lines = [
+            f"Personalidad: {personality['name']}",
+            f"Score Actual: {self.current_episode_scores[agent_idx]}",
+            f"Steps: {self.current_episode_steps[agent_idx]}",
+            f"Reward Total: {self.current_episode_rewards[agent_idx]:.2f}",
+            f"Episodios: {len(agent.episode_rewards)}",
+            "",
+            "=== RECOMPENSAS ===",
+            f"Comida: +{personality['food']:.1f}",
+            f"Muerte: {personality['death']:.1f}",
+            f"Auto-colisión: {personality['self_collision']:.1f}",
+            f"Paso: {personality['step']:+.2f}",
+            f"Acercarse: +{personality['approach']:.1f}",
+            f"Alejarse: {personality['retreat']:.1f}",
+            f"Mov. Directo: +{personality['direct_movement']:.1f}",
+            f"Eficiencia: +{personality['efficiency_bonus']:.1f}",
+            "",
+            "=== RED NEURONAL ===",
+            f"Epsilon: {agent.epsilon:.3f}",
+            f"Experiencias: {len(agent.rewards)}",
+            f"Estados: {len(agent.states)}",
+            f"Log Probs: {len(agent.log_probs)}",
+        ]
+        
+        # Dibujar información con colores mejorados
+        for i, line in enumerate(info_lines):
+            y_pos = y_offset + i * line_height
+            if y_pos > start_y + panel_height - 30:  # No salir del panel
+                break
+            
+            color = (240, 240, 240)  # Blanco más brillante
+            if line.startswith("==="):
+                color = self.agent_colors[agent_idx]
+            elif ":" in line and line != "":
+                color = (220, 220, 220)  # Gris claro
+            
+            if line != "":
+                text = self.font_small.render(line, True, color)
+                # Verificar que no se salga del panel
+                if start_x + text.get_width() < start_x + panel_width - 20:
+                    self.screen.blit(text, (start_x, y_pos))
+    
     def update_training_time(self):
         """🕒 Actualiza el tiempo transcurrido de entrenamiento"""
         if self.training_start_time:
@@ -2381,25 +2512,21 @@ class MultiAgentVisualTrainer:
             }
     
     def draw_neural_network_simple(self, activations, action):
-        """Dibuja red neuronal simplificada sin pesos o datos del agente seleccionado"""
+        """Dibuja red neuronal simplificada sin pesos y datos del agente seleccionado"""
         if activations is None:
-            return
-        
-        # 🆕 Si hay un agente seleccionado, mostrar sus datos en lugar de activaciones
-        if self.show_agent_details and self.selected_agent is not None:
-            self.draw_agent_details_in_neural_area()
             return
         
         pygame.draw.rect(self.screen, self.WHITE, self.neural_area)
         pygame.draw.rect(self.screen, self.BLACK, self.neural_area, 2)
         
-        # Título con color del agente y información en la misma línea
-        agent_color = self.agent_colors[self.neural_display_agent]
-        title = self.font_large.render(f"Red Neuronal - A{self.neural_display_agent + 1}", True, agent_color)
+        # Título con color del agente correcto (seleccionado o neural_display_agent)
+        display_agent = self.selected_agent if self.selected_agent is not None else self.neural_display_agent
+        agent_color = self.agent_colors[display_agent]
+        title = self.font_large.render(f"Red Neuronal - A{display_agent + 1}", True, agent_color)
         self.screen.blit(title, (self.neural_area.x + 10, self.neural_area.y + 10))
         
         # Información adicional del agente AL LADO del título
-        score_info = self.font.render(f"Score: {self.current_episode_scores[self.neural_display_agent]} | Steps: {self.current_episode_steps[self.neural_display_agent]}", True, self.BLACK)
+        score_info = self.font.render(f"Score: {self.current_episode_scores[display_agent]} | Steps: {self.current_episode_steps[display_agent]}", True, self.BLACK)
         title_width = title.get_width()
         self.screen.blit(score_info, (self.neural_area.x + 20 + title_width, self.neural_area.y + 15))
         
@@ -2488,6 +2615,8 @@ class MultiAgentVisualTrainer:
         probs_text = "Probs: " + " | ".join([f"{name}: {prob:.2f}" for name, prob in zip(action_names, activations['output'])])
         prob_surface = self.font_small.render(probs_text, True, self.BLACK)
         self.screen.blit(prob_surface, (self.neural_area.x + 10, self.neural_area.y + self.neural_area.height - 20))
+        
+        # Las activaciones neurales siempre se muestran normalmente aquí
     
     def draw_clean_connections(self, neuron_positions, layers):
         """Dibuja conexiones limpias entre TODAS las capas"""
@@ -2810,14 +2939,28 @@ class MultiAgentVisualTrainer:
                     self.draw_game(i, states[i], {'score': self.envs[i].score, 'steps': steps[i]})
             
             # SIEMPRE mostrar red neuronal (ACTIVACIONES SIEMPRE VISIBLES)
-            if not done_flags[self.neural_display_agent] and hasattr(self, 'last_activations') and self.last_activations:
-                self.draw_neural_network_simple(self.last_activations, self.last_action)
+            # Determinar qué agente mostrar: seleccionado o neural_display_agent
+            display_agent = self.selected_agent if self.selected_agent is not None else self.neural_display_agent
+            
+            if display_agent < len(done_flags) and not done_flags[display_agent]:
+                # Obtener activaciones del agente correcto
+                if self.selected_agent is not None and self.selected_agent < len(states):
+                    # Activaciones del agente seleccionado
+                    selected_activations = self.get_real_activations(self.selected_agent, states[self.selected_agent])
+                    self.draw_neural_network_simple(selected_activations, 0)  # Acción por defecto
+                elif hasattr(self, 'last_activations') and self.last_activations:
+                    # Activaciones normales del neural_display_agent
+                    self.draw_neural_network_simple(self.last_activations, self.last_action)
             
             # SIEMPRE mostrar TODOS los paneles (sin parpadeos)
             self.draw_training_info()      # Panel de control (lado derecho)
             self.draw_agent_stats()        # Estadísticas de agentes (lado izquierdo)
             self.draw_progress_graph()     # Gráfico de progreso (separado)
             self.draw_controls()           # Controles (parte inferior)
+            
+            # 🆕 Panel de datos del agente seleccionado (al lado del panel de control)
+            if self.show_agent_details and self.selected_agent is not None:
+                self.draw_agent_details_side_panel()
             
             # SIEMPRE actualizar pantalla completa
             pygame.display.flip()
