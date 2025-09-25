@@ -73,6 +73,14 @@ class MultiAgentVisualTrainer:
         self.min_agents = 2   # Mínimo permitido
         self.max_agents = 12  # Máximo permitido
         
+        # 📐 DIMENSIONES CONFIGURABLES DEL ENTORNO
+        self.grid_width = 25   # Ancho del tablero (mínimo 10, máximo 50)
+        self.grid_height = 20  # Alto del tablero (mínimo 8, máximo 40)
+        self.min_grid_width = 10
+        self.max_grid_width = 50
+        self.min_grid_height = 8
+        self.max_grid_height = 40
+        
         # 🚀 CONFIGURACIÓN MULTI-NÚCLEO PARA FPS REALES
         self.cpu_cores = mp.cpu_count()
         self.use_multiprocessing = True  # Activar procesamiento paralelo
@@ -273,7 +281,8 @@ class MultiAgentVisualTrainer:
         # Crear entornos con personalidades específicas
         for i in range(self.num_agents):
             personality = self.agent_personalities[i]
-            env = SnakeEnvironment(render=False, max_steps=self.max_steps, reward_config=personality)
+            env = SnakeEnvironment(render=False, max_steps=self.max_steps, reward_config=personality, 
+                                 grid_width=self.grid_width, grid_height=self.grid_height)
             self.envs.append(env)
             self.agent_names.append(f"{personality['name']}")  # Usar nombre de personalidad
             
@@ -403,10 +412,10 @@ class MultiAgentVisualTrainer:
         self.graph_area = pygame.Rect(agents_start_x, graph_y, stats_width, max(30, graph_height))
         
         # Controles en la parte inferior (con más margen desde abajo)
-        controls_y = max(graph_y + graph_height + 15, self.screen_height - 130)  # Más espacio desde abajo
+        controls_y = max(graph_y + graph_height + 15, self.screen_height - 160)  # Más espacio para 3 filas
         controls_width = self.screen_width - 2 * margin
-        controls_height = min(100, self.screen_height - controls_y - margin * 2)  # Doble margen inferior
-        self.controls_area = pygame.Rect(margin, controls_y, controls_width, max(80, controls_height))
+        controls_height = min(130, self.screen_height - controls_y - margin * 2)  # Altura para 3 filas
+        self.controls_area = pygame.Rect(margin, controls_y, controls_width, max(110, controls_height))
         
         # Botones de control con espaciado completamente adaptativo
         row1_y = self.controls_area.y + 25
@@ -445,6 +454,19 @@ class MultiAgentVisualTrainer:
             'agents_up': pygame.Rect(button2_start_x + button2_spacing * 3 + 30, row2_y, 25, 20),
             'rewards': pygame.Rect(button2_start_x + button2_spacing * 4, row2_y, min(70, button2_spacing - 5), 20),
         }
+        
+        # 📐 FILA 3: CONTROLES DE DIMENSIONES DEL GRID (nueva fila)
+        row3_y = row2_y + 35
+        grid_button_spacing = available_button_width // 4
+        grid_button_start_x = label_space + grid_button_spacing // 2
+        
+        self.buttons.update({
+            'grid_width_down': pygame.Rect(grid_button_start_x, row3_y, 25, 20),
+            'grid_width_up': pygame.Rect(grid_button_start_x + 30, row3_y, 25, 20),
+            'grid_height_down': pygame.Rect(grid_button_start_x + grid_button_spacing, row3_y, 25, 20),
+            'grid_height_up': pygame.Rect(grid_button_start_x + grid_button_spacing + 30, row3_y, 25, 20),
+            'grid_reset': pygame.Rect(grid_button_start_x + grid_button_spacing * 2, row3_y, min(80, grid_button_spacing - 5), 20),
+        })
         
         # Actualizar áreas de agentes con posiciones adaptativas - cantidad dinámica
         self.game_areas = []
@@ -516,6 +538,16 @@ class MultiAgentVisualTrainer:
                         self.load_checkpoint_dialog()  # 🆕 CARGAR CHECKPOINT
                     elif self.buttons['stop_training'].collidepoint(event.pos):
                         return False  # Terminar simulación
+                    elif self.buttons['grid_width_down'].collidepoint(event.pos):
+                        self.decrease_grid_width()
+                    elif self.buttons['grid_width_up'].collidepoint(event.pos):
+                        self.increase_grid_width()
+                    elif self.buttons['grid_height_down'].collidepoint(event.pos):
+                        self.decrease_grid_height()
+                    elif self.buttons['grid_height_up'].collidepoint(event.pos):
+                        self.increase_grid_height()
+                    elif self.buttons['grid_reset'].collidepoint(event.pos):
+                        self.reset_grid_dimensions()
                     else:
                         # 🆕 DETECTAR CLICS EN ENTORNOS
                         if hasattr(self, 'close_button_rect') and self.close_button_rect.collidepoint(event.pos):
@@ -1416,6 +1448,83 @@ class MultiAgentVisualTrainer:
         else:
             print(f"[CONFIG] Ya tienes el mínimo de agentes ({self.min_agents})")
     
+    def decrease_grid_width(self):
+        """📐 Reduce el ancho del grid"""
+        if self.training_started:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+            return
+            
+        if self.grid_width > self.min_grid_width:
+            self.grid_width -= 1
+            print(f"[CONFIG] Ancho del grid reducido a: {self.grid_width}")
+            self.recreate_environments()
+        else:
+            print(f"[CONFIG] Ya tienes el ancho mínimo ({self.min_grid_width})")
+    
+    def increase_grid_width(self):
+        """📐 Aumenta el ancho del grid"""
+        if self.training_started:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+            return
+            
+        if self.grid_width < self.max_grid_width:
+            self.grid_width += 1
+            print(f"[CONFIG] Ancho del grid aumentado a: {self.grid_width}")
+            self.recreate_environments()
+        else:
+            print(f"[CONFIG] Ya tienes el ancho máximo ({self.max_grid_width})")
+    
+    def decrease_grid_height(self):
+        """📐 Reduce el alto del grid"""
+        if self.training_started:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+            return
+            
+        if self.grid_height > self.min_grid_height:
+            self.grid_height -= 1
+            print(f"[CONFIG] Alto del grid reducido a: {self.grid_height}")
+            self.recreate_environments()
+        else:
+            print(f"[CONFIG] Ya tienes el alto mínimo ({self.min_grid_height})")
+    
+    def increase_grid_height(self):
+        """📐 Aumenta el alto del grid"""
+        if self.training_started:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+            return
+            
+        if self.grid_height < self.max_grid_height:
+            self.grid_height += 1
+            print(f"[CONFIG] Alto del grid aumentado a: {self.grid_height}")
+            self.recreate_environments()
+        else:
+            print(f"[CONFIG] Ya tienes el alto máximo ({self.max_grid_height})")
+    
+    def reset_grid_dimensions(self):
+        """📐 Resetea las dimensiones del grid a valores por defecto"""
+        if self.training_started:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+            return
+            
+        self.grid_width = 25
+        self.grid_height = 20
+        print(f"[CONFIG] Dimensiones del grid reseteadas a: {self.grid_width}x{self.grid_height}")
+        self.recreate_environments()
+    
+    def recreate_environments(self):
+        """📐 Recrea los entornos con las nuevas dimensiones"""
+        print(f"[CONFIG] Recreando entornos con dimensiones {self.grid_width}x{self.grid_height}")
+        
+        # Recrear entornos con nuevas dimensiones
+        self.envs = []
+        for i in range(self.num_agents):
+            personality = self.agent_personalities[i]
+            env = SnakeEnvironment(render=False, max_steps=self.max_steps, reward_config=personality, 
+                                 grid_width=self.grid_width, grid_height=self.grid_height)
+            self.envs.append(env)
+        
+        print(f"[CONFIG] Entornos recreados exitosamente")
+    
     def evolve_agents(self):
         """Sistema de evolución avanzado con múltiples criterios y diversidad genética"""
         print(f"\n[EVOLUCION] INICIANDO EVOLUCION GENERACION {self.episode // 50}")
@@ -2241,6 +2350,10 @@ class MultiAgentVisualTrainer:
         row2_label = self.font_small.render("CONFIG:", True, self.BLACK)
         self.screen.blit(row2_label, (self.controls_area.x + 10, self.controls_area.y + 53))
         
+        # 📐 Etiqueta para la tercera fila (dimensiones del grid)
+        row3_label = self.font_small.render("GRID:", True, self.BLACK)
+        self.screen.blit(row3_label, (self.controls_area.x + 10, self.controls_area.y + 88))
+        
         # Botón de INICIAR/INICIADO
         if not self.training_started:
             start_color = self.GREEN
@@ -2387,15 +2500,6 @@ class MultiAgentVisualTrainer:
         current_speed = self.speed_options[self.current_speed_index]
         current_personality = self.agent_personalities[self.neural_display_agent]
         
-        # Textos más compactos y posicionados correctamente
-        info_texts = [
-            f"Vel: {current_speed}",
-            f"Ep: {self.episode}/{self.max_episodes}",
-            f"Steps: {self.max_steps}",
-            f"Agentes: {self.num_agents}",
-            f"Red: {current_personality['name'][:8]}"  # Truncar nombre largo
-        ]
-        
         # Espaciado ajustado para caber en ventana
         start_x = 600  # Empezar más a la derecha
         spacing = 95   # Espaciado reducido
@@ -2406,6 +2510,71 @@ class MultiAgentVisualTrainer:
             # Verificar que no se salga de la ventana
             if x_pos + rendered.get_width() < self.screen_width - 10:
                 self.screen.blit(rendered, (x_pos, self.controls_area.y + 12))
+        
+        # 📐 CONTROLES DE DIMENSIONES DEL GRID (FILA 3)
+        if 'grid_width_down' in self.buttons:
+            # Botones de ancho del grid
+            grid_color = self.GRAY if self.training_started else self.ORANGE
+            
+            pygame.draw.rect(self.screen, grid_color, self.buttons['grid_width_down'])
+            pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_width_down'], 1)
+            width_down_text = self.font_small.render("-", True, self.WHITE)
+            width_down_rect = width_down_text.get_rect(center=self.buttons['grid_width_down'].center)
+            self.screen.blit(width_down_text, width_down_rect)
+            
+            pygame.draw.rect(self.screen, grid_color, self.buttons['grid_width_up'])
+            pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_width_up'], 1)
+            width_up_text = self.font_small.render("+", True, self.WHITE)
+            width_up_rect = width_up_text.get_rect(center=self.buttons['grid_width_up'].center)
+            self.screen.blit(width_up_text, width_up_rect)
+            
+            # Etiqueta de ancho
+            width_label = self.font_small.render(f"Ancho: {self.grid_width}", True, self.BLACK)
+            width_center_x = (self.buttons['grid_width_down'].x + self.buttons['grid_width_up'].x + self.buttons['grid_width_up'].width) // 2
+            label_y = max(self.buttons['grid_width_down'].y - 15, self.controls_area.y + 88)
+            self.screen.blit(width_label, (width_center_x - width_label.get_width()//2, label_y))
+        
+        if 'grid_height_down' in self.buttons:
+            # Botones de alto del grid
+            grid_color = self.GRAY if self.training_started else self.ORANGE
+            
+            pygame.draw.rect(self.screen, grid_color, self.buttons['grid_height_down'])
+            pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_height_down'], 1)
+            height_down_text = self.font_small.render("-", True, self.WHITE)
+            height_down_rect = height_down_text.get_rect(center=self.buttons['grid_height_down'].center)
+            self.screen.blit(height_down_text, height_down_rect)
+            
+            pygame.draw.rect(self.screen, grid_color, self.buttons['grid_height_up'])
+            pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_height_up'], 1)
+            height_up_text = self.font_small.render("+", True, self.WHITE)
+            height_up_rect = height_up_text.get_rect(center=self.buttons['grid_height_up'].center)
+            self.screen.blit(height_up_text, height_up_rect)
+            
+            # Etiqueta de alto
+            height_label = self.font_small.render(f"Alto: {self.grid_height}", True, self.BLACK)
+            height_center_x = (self.buttons['grid_height_down'].x + self.buttons['grid_height_up'].x + self.buttons['grid_height_up'].width) // 2
+            label_y = max(self.buttons['grid_height_down'].y - 15, self.controls_area.y + 88)
+            self.screen.blit(height_label, (height_center_x - height_label.get_width()//2, label_y))
+        
+        if 'grid_reset' in self.buttons:
+            # Botón de reset de dimensiones
+            reset_color = self.GRAY if self.training_started else self.RED
+            
+            pygame.draw.rect(self.screen, reset_color, self.buttons['grid_reset'])
+            pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_reset'], 1)
+            reset_text = self.font_small.render("RESET", True, self.WHITE)
+            reset_rect = reset_text.get_rect(center=self.buttons['grid_reset'].center)
+            self.screen.blit(reset_text, reset_rect)
+        
+        # Actualizar información para incluir dimensiones del grid
+        info_texts = [
+            f"Vel: {current_speed}",
+            f"Ep: {self.episode}/{self.max_episodes}",
+            f"Steps: {self.max_steps}",
+            f"Agentes: {self.num_agents}",
+            f"Grid: {self.grid_width}x{self.grid_height}",
+            f"Red: {current_personality['name'][:8]}"  # Truncar nombre largo
+        ]
     
     def draw_game(self, agent_idx, state, info):
         """Dibuja un juego individual"""
