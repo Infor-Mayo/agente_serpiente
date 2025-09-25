@@ -3,9 +3,9 @@ import random
 import sys
 import numpy as np
 
-# Configuración del juego
-GRID_WIDTH = 25
-GRID_HEIGHT = 20
+# Configuración del juego - DIMENSIONES CONFIGURABLES
+DEFAULT_GRID_WIDTH = 25
+DEFAULT_GRID_HEIGHT = 20
 CELL_SIZE = 25  # Tamaño de cada celda en píxeles (más grande)
 
 # Inicializar pygame
@@ -30,9 +30,11 @@ DIRECTION_VECTORS = {
 }
 
 class SnakeEnvironment:
-    def __init__(self, render=False, max_steps=1000, reward_config=None):
+    def __init__(self, render=False, max_steps=1000, reward_config=None, grid_width=None, grid_height=None):
         self.render_game = render
-        self.grid_height = GRID_HEIGHT
+        # 🆕 DIMENSIONES CONFIGURABLES
+        self.grid_width = grid_width if grid_width is not None else DEFAULT_GRID_WIDTH
+        self.grid_height = grid_height if grid_height is not None else DEFAULT_GRID_HEIGHT
         self.max_steps = max_steps  # Límite de pasos por episodio (configurable)
         
         # Sistema de recompensas ULTRA-BALANCEADO para máxima exploración
@@ -69,7 +71,7 @@ class SnakeEnvironment:
         self.reward_config.update(new_config)
     
     def reset(self):
-        start_x, start_y = GRID_WIDTH // 2, GRID_HEIGHT // 2
+        start_x, start_y = self.grid_width // 2, self.grid_height // 2
         self.snake_positions = [(start_x, start_y)]
         self.direction = RIGHT
         self.score = 0
@@ -91,11 +93,11 @@ class SnakeEnvironment:
         """Genera una nueva posición de comida"""
         attempts = 0
         while attempts < 100:  # Evitar bucle infinito
-            x = random.randint(0, GRID_WIDTH - 1)
-            y = random.randint(0, GRID_HEIGHT - 1)
+            x = random.randint(0, self.grid_width - 1)
+            y = random.randint(0, self.grid_height - 1)
             
             # Verificar que esté dentro de los límites y no en la serpiente
-            if (0 <= x < GRID_WIDTH and 0 <= y < GRID_HEIGHT and 
+            if (0 <= x < self.grid_width and 0 <= y < self.grid_height and 
                 (x, y) not in self.snake_positions):
                 self.food_position = (x, y)
                 
@@ -111,7 +113,7 @@ class SnakeEnvironment:
         
         # Si no se pudo generar comida válida, usar posición segura
         if attempts >= 100:
-            self.food_position = (GRID_WIDTH // 2, GRID_HEIGHT // 2)
+            self.food_position = (self.grid_width // 2, self.grid_height // 2)
     
     def _get_state(self):
         """
@@ -134,8 +136,8 @@ class SnakeEnvironment:
         direction_onehot[self.direction] = 1
         
         # Posición relativa de la comida (normalizada)
-        food_rel_x = (food_x - head_x) / GRID_WIDTH
-        food_rel_y = (food_y - head_y) / GRID_HEIGHT
+        food_rel_x = (food_x - head_x) / self.grid_width
+        food_rel_y = (food_y - head_y) / self.grid_height
         
         # Peligros en cada dirección
         dangers = []
@@ -144,17 +146,17 @@ class SnakeEnvironment:
             new_x, new_y = head_x + dx, head_y + dy
             
             # Peligro si hay pared o cuerpo de serpiente
-            danger = (new_x < 0 or new_x >= GRID_WIDTH or 
-                     new_y < 0 or new_y >= GRID_HEIGHT or 
+            danger = (new_x < 0 or new_x >= self.grid_width or 
+                     new_y < 0 or new_y >= self.grid_height or 
                      (new_x, new_y) in self.snake_positions)
             dangers.append(1.0 if danger else 0.0)
         
         # Distancia a las paredes (normalizada)
         wall_distances = [
-            head_y / GRID_HEIGHT,  # arriba
-            (GRID_HEIGHT - 1 - head_y) / GRID_HEIGHT,  # abajo
-            head_x / GRID_WIDTH,  # izquierda
-            (GRID_WIDTH - 1 - head_x) / GRID_WIDTH  # derecha
+            head_y / self.grid_height,  # arriba
+            (self.grid_height - 1 - head_y) / self.grid_height,  # abajo
+            head_x / self.grid_width,  # izquierda
+            (self.grid_width - 1 - head_x) / self.grid_width  # derecha
         ]
         
         # 🧠 PREDICCIÓN DE CONSECUENCIAS - Estimar qué pasaría en cada dirección
@@ -185,7 +187,7 @@ class SnakeEnvironment:
             new_x, new_y = head_x + dx, head_y + dy
             
             # 1. PROGRESO HACIA LA COMIDA (-1 a 1)
-            if (new_x >= 0 and new_x < GRID_WIDTH and new_y >= 0 and new_y < GRID_HEIGHT):
+            if (new_x >= 0 and new_x < self.grid_width and new_y >= 0 and new_y < self.grid_height):
                 new_distance = abs(new_x - food_x) + abs(new_y - food_y)
                 if new_distance < current_distance:
                     food_progress = 1.0  # Se acerca a la comida
@@ -200,7 +202,7 @@ class SnakeEnvironment:
             safety = 1.0  # Empezar asumiendo seguro
             
             # Verificar colisión inmediata
-            if (new_x < 0 or new_x >= GRID_WIDTH or new_y < 0 or new_y >= GRID_HEIGHT):
+            if (new_x < 0 or new_x >= self.grid_width or new_y < 0 or new_y >= self.grid_height):
                 safety = 0.0  # Pared = muy peligroso
             elif (new_x, new_y) in self.snake_positions:
                 safety = 0.0  # Cuerpo = muy peligroso
@@ -208,9 +210,9 @@ class SnakeEnvironment:
                 # Evaluar qué tan cerca está de paredes
                 min_wall_distance = min(
                     new_y,  # distancia a pared superior
-                    GRID_HEIGHT - 1 - new_y,  # distancia a pared inferior
+                    self.grid_height - 1 - new_y,  # distancia a pared inferior
                     new_x,  # distancia a pared izquierda
-                    GRID_WIDTH - 1 - new_x   # distancia a pared derecha
+                    self.grid_width - 1 - new_x   # distancia a pared derecha
                 )
                 
                 # Normalizar seguridad basada en distancia a paredes
@@ -276,8 +278,8 @@ class SnakeEnvironment:
                 # Posición real del segmento seleccionado
                 body_idx = selected_indices[i]
                 body_x, body_y = body_parts[body_idx]
-                rel_x = (body_x - head_x) / GRID_WIDTH  # Posición relativa X
-                rel_y = (body_y - head_y) / GRID_HEIGHT  # Posición relativa Y
+                rel_x = (body_x - head_x) / self.grid_width  # Posición relativa X
+                rel_y = (body_y - head_y) / self.grid_height  # Posición relativa Y
                 body_encoding.extend([rel_x, rel_y])
             else:
                 # Relleno para slots vacíos
@@ -356,8 +358,8 @@ class SnakeEnvironment:
             
             # Verificar si la dirección está libre
             is_free = (
-                0 <= check_x < GRID_WIDTH and  # No es pared
-                0 <= check_y < GRID_HEIGHT and  # No es pared
+                0 <= check_x < self.grid_width and  # No es pared
+                0 <= check_y < self.grid_height and  # No es pared
                 (check_x, check_y) not in self.snake_positions  # No es cuerpo
             )
             
@@ -393,8 +395,8 @@ class SnakeEnvironment:
         blocked_area = 0
         total_area = 0
         
-        for check_x in range(max(0, x-2), min(GRID_WIDTH, x+3)):
-            for check_y in range(max(0, y-2), min(GRID_HEIGHT, y+3)):
+        for check_x in range(max(0, x-2), min(self.grid_width, x+3)):
+            for check_y in range(max(0, y-2), min(self.grid_height, y+3)):
                 total_area += 1
                 if (check_x, check_y) in self.snake_positions:
                     blocked_area += 1
@@ -507,8 +509,8 @@ class SnakeEnvironment:
         new_distance = abs(new_head[0] - self.food_position[0]) + abs(new_head[1] - self.food_position[1])
         
         # Colisión con paredes (verificación reforzada)
-        if (new_head[0] < 0 or new_head[0] >= GRID_WIDTH or 
-            new_head[1] < 0 or new_head[1] >= GRID_HEIGHT):
+        if (new_head[0] < 0 or new_head[0] >= self.grid_width or 
+            new_head[1] < 0 or new_head[1] >= self.grid_height):
             done = True
             self.done = True
             reward = self.reward_config['death']
@@ -537,7 +539,7 @@ class SnakeEnvironment:
             
             # VERIFICACIÓN DE SEGURIDAD: Asegurar que la cabeza esté dentro de límites
             head = self.snake_positions[0]
-            if not (0 <= head[0] < GRID_WIDTH and 0 <= head[1] < GRID_HEIGHT):
+            if not (0 <= head[0] < self.grid_width and 0 <= head[1] < self.grid_height):
                 print(f"[ERROR CRÍTICO] Serpiente fuera de límites después de movimiento: {head}")
                 done = True
                 self.done = True
@@ -554,9 +556,9 @@ class SnakeEnvironment:
             # 1. Bonus por evitar paredes
             dist_to_walls = [
                 head_y,  # arriba
-                GRID_HEIGHT - 1 - head_y,  # abajo
+                self.grid_height - 1 - head_y,  # abajo
                 head_x,  # izquierda
-                GRID_WIDTH - 1 - head_x   # derecha
+                self.grid_width - 1 - head_x   # derecha
             ]
             
             min_wall_distance = min(dist_to_walls)
