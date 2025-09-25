@@ -35,17 +35,17 @@ class SnakeEnvironment:
         self.grid_height = GRID_HEIGHT
         self.max_steps = max_steps  # Límite de pasos por episodio (configurable)
         
-        # Sistema de recompensas para comportamiento directo y eficiente
+        # Sistema de recompensas ULTRA-BALANCEADO para máxima exploración
         self.reward_config = {
-            'food': 10.0,
-            'death': -10.0,
-            'self_collision': -15.0,  # Penalización específica para auto-colisión
-            'step': -0.1,
-            'approach': 0.5,
-            'retreat': -0.5,
-            'direct_movement': 1.0,
-            'efficiency_bonus': 2.0,
-            'wasted_movement': -0.3
+            'food': 200.0,           # MÁXIMO: Hacer manzanas EXTREMADAMENTE atractivas
+            'death': -5.0,           # MÍNIMO: Penalización muy baja por muerte
+            'self_collision': -8.0,  # MÍNIMO: Penalización muy baja por auto-colisión
+            'step': 0.2,             # ALTO: Recompensar mucho la supervivencia
+            'approach': 3.0,         # ALTO: Recompensar acercarse a manzana
+            'retreat': -0.1,         # MÍNIMO: Casi sin penalización por alejarse
+            'direct_movement': 5.0,  # ALTO: Recompensar mucho movimiento directo
+            'efficiency_bonus': 8.0, # ALTO: Bonus alto por eficiencia
+            'wasted_movement': -0.05 # MÍNIMO: Casi sin penalización por ineficiencia
         }
         # Variables para tracking de eficiencia
         self.initial_distance = None
@@ -585,6 +585,15 @@ class SnakeEnvironment:
             # Castigo adicional por perder mucho tiempo sin progreso
             if self.steps_since_progress > 5:
                 reward -= 0.2 * (self.steps_since_progress - 5)  # Castigo creciente
+            
+            # 🎯 BONUS POR SUPERVIVENCIA: Incentivar exploración en lugar de muerte rápida
+            survival_bonus = min(self.steps * 0.1, 10.0)  # AUMENTADO: Bonus más alto por sobrevivir
+            reward += survival_bonus
+            
+            # 🚀 BONUS ADICIONAL POR EXPLORACIÓN TEMPRANA (primeros 50 steps)
+            if self.steps <= 50:
+                exploration_bonus = 2.0  # Bonus extra por explorar al inicio
+                reward += exploration_bonus
         
         # Terminar si el episodio es muy largo
         if self.steps >= self.max_steps:
