@@ -1624,29 +1624,18 @@ class MultiAgentVisualTrainer:
     
     def detect_environment_click(self, mouse_pos):
         """🖱️ Detecta clic en entornos y selecciona el agente correspondiente"""
-        # Calcular posiciones de los entornos (4x3 grid)
-        games_per_row = 4
-        game_width = GAME_WIDTH
-        game_height = GAME_HEIGHT
-        
+        # Usar las áreas de juego ya calculadas
         for i in range(self.num_agents):
-            row = i // games_per_row
-            col = i % games_per_row
-            
-            # Calcular posición del entorno
-            x = col * game_width
-            y = row * game_height
-            
-            # Crear rectángulo del entorno
-            env_rect = pygame.Rect(x, y, game_width, game_height)
-            
-            # Verificar si el clic está dentro del entorno
-            if env_rect.collidepoint(mouse_pos):
-                self.selected_agent = i
-                self.show_agent_details = True
-                self.neural_display_agent = i  # También cambiar la visualización neuronal
-                print(f"[CLICK] Seleccionado agente {i+1} ({self.agent_personalities[i]['name']})")
-                return True
+            if i < len(self.game_areas):  # Verificar que el área existe
+                env_rect = self.game_areas[i]
+                
+                # Verificar si el clic está dentro del entorno
+                if env_rect.collidepoint(mouse_pos):
+                    self.selected_agent = i
+                    self.show_agent_details = True
+                    self.neural_display_agent = i  # También cambiar la visualización neuronal
+                    print(f"[CLICK] Seleccionado agente {i+1} ({self.agent_personalities[i]['name']})")
+                    return True
         
         return False
     
