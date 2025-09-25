@@ -149,6 +149,12 @@ class MultiAgentVisualTrainer:
         # Variables para visualización de red neuronal (agente con mayor score actual)
         self.neural_display_agent = 0  # Agente cuya red neuronal se muestra
         
+        # 🆕 SISTEMA DE SELECCIÓN DE ENTORNOS
+        self.selected_agent = None  # Agente seleccionado para mostrar datos
+        self.show_agent_details = False  # Mostrar panel de detalles
+        self.agent_details_panel = None  # Panel de detalles del agente
+        self.mouse_pos = (0, 0)  # Posición del mouse para detección de clics
+        
         # Inicializar agentes y entornos con cantidad configurable
         self._initialize_agents()
         
@@ -510,6 +516,15 @@ class MultiAgentVisualTrainer:
                         self.load_checkpoint_dialog()  # 🆕 CARGAR CHECKPOINT
                     elif self.buttons['stop_training'].collidepoint(event.pos):
                         return False  # Terminar simulación
+                    else:
+                        # 🆕 DETECTAR CLICS EN ENTORNOS
+                        if hasattr(self, 'close_button_rect') and self.close_button_rect.collidepoint(event.pos):
+                            # Cerrar panel de detalles
+                            self.show_agent_details = False
+                            self.selected_agent = None
+                        else:
+                            # Detectar clic en entornos de entrenamiento
+                            self.detect_environment_click(event.pos)
         
         return True
     
@@ -1607,6 +1622,122 @@ class MultiAgentVisualTrainer:
         if self.neural_display_agent != best_agent:
             self.neural_display_agent = best_agent
     
+    def detect_environment_click(self, mouse_pos):
+        """🖱️ Detecta clic en entornos y selecciona el agente correspondiente"""
+        # Calcular posiciones de los entornos (4x3 grid)
+        games_per_row = 4
+        game_width = GAME_WIDTH
+        game_height = GAME_HEIGHT
+        
+        for i in range(self.num_agents):
+            row = i // games_per_row
+            col = i % games_per_row
+            
+            # Calcular posición del entorno
+            x = col * game_width
+            y = row * game_height
+            
+            # Crear rectángulo del entorno
+            env_rect = pygame.Rect(x, y, game_width, game_height)
+            
+            # Verificar si el clic está dentro del entorno
+            if env_rect.collidepoint(mouse_pos):
+                self.selected_agent = i
+                self.show_agent_details = True
+                self.neural_display_agent = i  # También cambiar la visualización neuronal
+                print(f"[CLICK] Seleccionado agente {i+1} ({self.agent_personalities[i]['name']})")
+                return True
+        
+        return False
+    
+    def draw_agent_details_panel(self):
+        """🔍 Dibuja panel detallado del agente seleccionado"""
+        if not self.show_agent_details or self.selected_agent is None:
+            return
+        
+        agent_idx = self.selected_agent
+        agent = self.agents[agent_idx]
+        personality = self.agent_personalities[agent_idx]
+        
+        # Panel de detalles (lado derecho de la pantalla)
+        panel_width = 350
+        panel_height = 600
+        panel_x = WINDOW_WIDTH - panel_width - 10
+        panel_y = 50
+        
+        # Fondo del panel con transparencia
+        panel_surface = pygame.Surface((panel_width, panel_height))
+        panel_surface.set_alpha(240)
+        panel_surface.fill((30, 30, 30))
+        self.screen.blit(panel_surface, (panel_x, panel_y))
+        
+        # Borde del panel
+        pygame.draw.rect(self.screen, self.agent_colors[agent_idx], 
+                        (panel_x, panel_y, panel_width, panel_height), 3)
+        
+        # Título del panel
+        title = self.font_large.render(f"AGENTE {agent_idx + 1}", True, self.agent_colors[agent_idx])
+        self.screen.blit(title, (panel_x + 10, panel_y + 10))
+        
+        # Botón de cerrar (X)
+        close_btn_size = 25
+        close_btn_x = panel_x + panel_width - close_btn_size - 10
+        close_btn_y = panel_y + 10
+        pygame.draw.rect(self.screen, (200, 50, 50), 
+                        (close_btn_x, close_btn_y, close_btn_size, close_btn_size))
+        close_text = self.font.render("X", True, self.WHITE)
+        self.screen.blit(close_text, (close_btn_x + 8, close_btn_y + 5))
+        
+        # Información del agente
+        y_offset = panel_y + 50
+        line_height = 25
+        
+        info_lines = [
+            f"Personalidad: {personality['name']}",
+            f"Descripción: {personality['description'][:40]}...",
+            "",
+            "=== ESTADÍSTICAS ACTUALES ===",
+            f"Score Actual: {self.current_episode_scores[agent_idx]}",
+            f"Steps Actuales: {self.current_episode_steps[agent_idx]}",
+            f"Reward Total: {self.current_episode_rewards[agent_idx]:.2f}",
+            f"Episodios Jugados: {len(agent.episode_rewards)}",
+            "",
+            "=== CONFIGURACIÓN DE RECOMPENSAS ===",
+            f"Comida: +{personality['food']:.1f}",
+            f"Muerte: {personality['death']:.1f}",
+            f"Auto-colisión: {personality['self_collision']:.1f}",
+            f"Paso: {personality['step']:+.2f}",
+            f"Acercarse: +{personality['approach']:.1f}",
+            f"Alejarse: {personality['retreat']:.1f}",
+            f"Mov. Directo: +{personality['direct_movement']:.1f}",
+            f"Bonus Eficiencia: +{personality['efficiency_bonus']:.1f}",
+            f"Mov. Ineficiente: {personality['wasted_movement']:.1f}",
+            "",
+            "=== DATOS DE LA RED NEURONAL ===",
+            f"Epsilon Actual: {agent.epsilon:.3f}",
+            f"Episodios Entrenados: {agent.episode_count}",
+            f"Experiencias Acumuladas: {len(agent.rewards)}",
+            f"Estados Guardados: {len(agent.states)}",
+            f"Log Probs: {len(agent.log_probs)}",
+        ]
+        
+        # Dibujar líneas de información
+        for i, line in enumerate(info_lines):
+            if y_offset + i * line_height > panel_y + panel_height - 20:
+                break  # No salir del panel
+            
+            color = self.WHITE
+            if line.startswith("==="):
+                color = self.agent_colors[agent_idx]
+            elif ":" in line and not line.startswith("Descripción"):
+                color = (200, 200, 200)
+            
+            text = self.font_small.render(line, True, color)
+            self.screen.blit(text, (panel_x + 10, y_offset + i * line_height))
+        
+        # Guardar rectángulo del botón cerrar para detección de clics
+        self.close_button_rect = pygame.Rect(close_btn_x, close_btn_y, close_btn_size, close_btn_size)
+    
     def update_training_time(self):
         """🕒 Actualiza el tiempo transcurrido de entrenamiento"""
         if self.training_start_time:
@@ -2093,6 +2224,12 @@ class MultiAgentVisualTrainer:
             # Agregar texto indicador
             neural_indicator = self.font_small.render("RED NEURONAL", True, self.PURPLE)
             self.screen.blit(neural_indicator, (area.x + area.width - 80, area.y - 15))
+        elif agent_idx == self.selected_agent:
+            # 🆕 Borde dorado para el agente seleccionado para ver detalles
+            pygame.draw.rect(self.screen, (255, 215, 0), area, 3)  # Dorado
+            # Agregar texto indicador
+            selected_indicator = self.font_small.render("SELECCIONADO", True, (255, 215, 0))
+            self.screen.blit(selected_indicator, (area.x + area.width - 90, area.y - 15))
         else:
             pygame.draw.rect(self.screen, self.BLACK, area, 1)
         
@@ -2605,6 +2742,9 @@ class MultiAgentVisualTrainer:
             self.draw_agent_stats()        # Estadísticas de agentes (lado izquierdo)
             self.draw_progress_graph()     # Gráfico de progreso (separado)
             self.draw_controls()           # Controles (parte inferior)
+            
+            # 🆕 PANEL DE DETALLES DEL AGENTE SELECCIONADO
+            self.draw_agent_details_panel()
             
             # SIEMPRE actualizar pantalla completa
             pygame.display.flip()
