@@ -524,7 +524,11 @@ class MultiAgentVisualTrainer:
                             self.selected_agent = None
                         else:
                             # Detectar clic en entornos de entrenamiento
-                            self.detect_environment_click(event.pos)
+                            clicked = self.detect_environment_click(event.pos)
+                            # Si no se hizo clic en ningún entorno, deseleccionar
+                            if not clicked:
+                                self.selected_agent = None
+                                self.show_agent_details = False
         
         return True
     
@@ -1631,10 +1635,17 @@ class MultiAgentVisualTrainer:
                 
                 # Verificar si el clic está dentro del entorno
                 if env_rect.collidepoint(mouse_pos):
-                    self.selected_agent = i
-                    self.show_agent_details = True
-                    self.neural_display_agent = i  # También cambiar la visualización neuronal
-                    print(f"[CLICK] Seleccionado agente {i+1} ({self.agent_personalities[i]['name']})")
+                    # Si ya está seleccionado, deseleccionar
+                    if self.selected_agent == i:
+                        self.selected_agent = None
+                        self.show_agent_details = False
+                        print(f"[CLICK] Deseleccionado agente {i+1}")
+                    else:
+                        # Seleccionar nuevo agente
+                        self.selected_agent = i
+                        self.show_agent_details = True
+                        self.neural_display_agent = i  # También cambiar la visualización neuronal
+                        print(f"[CLICK] Seleccionado agente {i+1} ({self.agent_personalities[i]['name']})")
                     return True
         
         return False
@@ -1735,6 +1746,68 @@ class MultiAgentVisualTrainer:
         
         # Guardar rectángulo del botón cerrar para detección de clics
         self.close_button_rect = pygame.Rect(close_btn_x, close_btn_y, close_btn_size, close_btn_size)
+    
+    def draw_agent_details_in_neural_area(self):
+        """🔍 Dibuja datos del agente seleccionado en el área de red neuronal"""
+        if self.selected_agent is None:
+            return
+        
+        agent_idx = self.selected_agent
+        agent = self.agents[agent_idx]
+        personality = self.agent_personalities[agent_idx]
+        
+        # Usar el área de red neuronal existente
+        area = self.neural_area
+        
+        # Fondo
+        pygame.draw.rect(self.screen, self.WHITE, area)
+        pygame.draw.rect(self.screen, self.agent_colors[agent_idx], area, 3)
+        
+        # Título
+        title = self.font_large.render(f"DATOS AGENTE {agent_idx + 1}", True, self.agent_colors[agent_idx])
+        self.screen.blit(title, (area.x + 10, area.y + 10))
+        
+        # Información del agente
+        y_offset = area.y + 45
+        line_height = 20
+        
+        info_lines = [
+            f"Personalidad: {personality['name']}",
+            f"Score Actual: {self.current_episode_scores[agent_idx]}",
+            f"Steps: {self.current_episode_steps[agent_idx]}",
+            f"Reward Total: {self.current_episode_rewards[agent_idx]:.2f}",
+            f"Episodios: {len(agent.episode_rewards)}",
+            "",
+            "=== RECOMPENSAS ===",
+            f"Comida: +{personality['food']:.1f}",
+            f"Muerte: {personality['death']:.1f}",
+            f"Paso: {personality['step']:+.2f}",
+            f"Acercarse: +{personality['approach']:.1f}",
+            f"Alejarse: {personality['retreat']:.1f}",
+            f"Mov. Directo: +{personality['direct_movement']:.1f}",
+            f"Eficiencia: +{personality['efficiency_bonus']:.1f}",
+            "",
+            "=== RED NEURONAL ===",
+            f"Epsilon: {agent.epsilon:.3f}",
+            f"Experiencias: {len(agent.rewards)}",
+            f"Estados: {len(agent.states)}",
+            f"Log Probs: {len(agent.log_probs)}",
+        ]
+        
+        # Dibujar líneas de información
+        for i, line in enumerate(info_lines):
+            if y_offset + i * line_height > area.y + area.height - 10:
+                break  # No salir del área
+            
+            color = self.BLACK
+            if line.startswith("==="):
+                color = self.agent_colors[agent_idx]
+            elif ":" in line and line != "":
+                color = (60, 60, 60)
+            
+            if line != "":  # No dibujar líneas vacías
+                text = self.font_small.render(line, True, color)
+                self.screen.blit(text, (area.x + 10, y_offset + i * line_height))
     
     def update_training_time(self):
         """🕒 Actualiza el tiempo transcurrido de entrenamiento"""
@@ -2308,8 +2381,13 @@ class MultiAgentVisualTrainer:
             }
     
     def draw_neural_network_simple(self, activations, action):
-        """Dibuja red neuronal simplificada sin pesos"""
+        """Dibuja red neuronal simplificada sin pesos o datos del agente seleccionado"""
         if activations is None:
+            return
+        
+        # 🆕 Si hay un agente seleccionado, mostrar sus datos en lugar de activaciones
+        if self.show_agent_details and self.selected_agent is not None:
+            self.draw_agent_details_in_neural_area()
             return
         
         pygame.draw.rect(self.screen, self.WHITE, self.neural_area)
@@ -2740,9 +2818,6 @@ class MultiAgentVisualTrainer:
             self.draw_agent_stats()        # Estadísticas de agentes (lado izquierdo)
             self.draw_progress_graph()     # Gráfico de progreso (separado)
             self.draw_controls()           # Controles (parte inferior)
-            
-            # 🆕 PANEL DE DETALLES DEL AGENTE SELECCIONADO
-            self.draw_agent_details_panel()
             
             # SIEMPRE actualizar pantalla completa
             pygame.display.flip()
