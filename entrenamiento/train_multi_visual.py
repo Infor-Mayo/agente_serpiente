@@ -23,6 +23,13 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import threading
 from functools import partial
 
+# 🆘 CHECKPOINT DE EMERGENCIA
+import atexit
+import signal
+
+# 📝 SISTEMA DE LOGGING
+import logging
+
 class MultiAgentVisualTrainer:
     """
     Entrenador con 4 agentes simultáneos y visualización optimizada
@@ -72,8 +79,20 @@ class MultiAgentVisualTrainer:
         self.process_pool = None  # Pool de procesos reales (no threads)
         self.batch_size = max(2, self.cpu_cores // 2)  # Procesar en lotes
         self.ultra_fast_mode = False  # Modo ultra rápido sin renderizado
+        
+        # 🧠 ENTRENAMIENTO PARALELO EN TIEMPO REAL
+        self.training_queue = []  # Cola de agentes listos para entrenar
+        self.training_in_progress = set()  # Agentes siendo entrenados
+        self.parallel_training = True  # Entrenar mientras otros juegan
+        
+        # 🆘 CHECKPOINT DE EMERGENCIA
+        self.emergency_save_enabled = True
+        self.last_emergency_save = 0
+        self.emergency_save_interval = 300  # 5 minutos en segundos
+        
         print(f"[MULTI-CORE] Detectados {self.cpu_cores} núcleos de CPU")
         print(f"[MULTI-CORE] Procesamiento paralelo: {'ACTIVADO' if self.use_multiprocessing else 'DESACTIVADO'}")
+        print(f"[MULTI-CORE] Entrenamiento paralelo: {'ACTIVADO' if self.parallel_training else 'DESACTIVADO'}")
         print(f"[MULTI-CORE] Tamaño de lote: {self.batch_size} agentes por proceso")
         
         # Colores
@@ -122,34 +141,123 @@ class MultiAgentVisualTrainer:
         # Cargar personalidades desde el archivo externo
         self.reward_personalities = SNAKE_PERSONALITIES
         
+        # 🎲 ASIGNACIÓN ALEATORIA DE PERSONALIDADES SIN REPETICIÓN
+        self.used_personalities = set()  # Personalidades ya asignadas en esta sesión
+        self.personality_assignments = {}  # Mapeo agente -> personalidad
+        self.loaded_from_checkpoint = False  # Si se cargó desde entrenamiento previo
+        
         # Variables para visualización de red neuronal (agente con mayor score actual)
         self.neural_display_agent = 0  # Agente cuya red neuronal se muestra
         
         # Inicializar agentes y entornos con cantidad configurable
         self._initialize_agents()
+        
+        # 📝 SISTEMA DE LOGGING POR SESIÓN (después de inicializar todo)
+        self.setup_logging_system()
+        
         self.training_start_time = None
         self.current_training_time = 0  # Tiempo transcurrido en segundos
         self.last_activations = None
         self.last_action = None
         
-        # Crear directorio para modelos
-        os.makedirs('models', exist_ok=True)
+        # Crear directorio para modelos en la raíz del proyecto
+        models_dir = os.path.join(os.path.dirname(__file__), '..', 'models')
+        os.makedirs(models_dir, exist_ok=True)
         
         # Inicializar botones (se actualizarán en update_layout)
         self.buttons = {}
         self.update_layout()
+        
+        # 🆘 Configurar checkpoint de emergencia
+        self.setup_emergency_handlers()
+        print(f"[EMERGENCY] Checkpoint automático cada {self.emergency_save_interval//60} minutos")
+    
+    def setup_logging_system(self):
+        """📝 Configura el sistema de logging por sesión de entrenamiento"""
+        try:
+            # Crear directorio de logs en la raíz del proyecto
+            logs_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            # Nombre del archivo de log con timestamp y session_id
+            log_filename = f"training_session_{self.session_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            log_filepath = os.path.join(logs_dir, log_filename)
+            
+            # Crear archivo de log inicial con escritura directa
+            with open(log_filepath, 'w', encoding='utf-8') as f:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                f.write(f"{timestamp} | INFO | {'='*80}\n")
+                f.write(f"{timestamp} | INFO | NUEVA SESIÓN DE ENTRENAMIENTO INICIADA\n")
+                f.write(f"{timestamp} | INFO | {'='*80}\n")
+                f.write(f"{timestamp} | INFO | Session ID: {self.session_id}\n")
+                f.write(f"{timestamp} | INFO | Archivo de log: {log_filename}\n")
+                f.write(f"{timestamp} | INFO | Número de agentes: {self.num_agents}\n")
+                f.write(f"{timestamp} | INFO | Máximo de episodios: {self.max_episodes}\n")
+                f.write(f"{timestamp} | INFO | Máximo de steps por episodio: {self.max_steps}\n")
+                f.write(f"{timestamp} | INFO | CPU cores detectados: {self.cpu_cores}\n")
+                f.write(f"{timestamp} | INFO | Entrenamiento paralelo: {'ACTIVADO' if self.parallel_training else 'DESACTIVADO'}\n")
+                f.write(f"{timestamp} | INFO | {'-' * 40}\n")
+                f.write(f"{timestamp} | INFO | PERSONALIDADES ASIGNADAS:\n")
+                f.flush()
+            
+            # Guardar referencia al archivo para uso posterior
+            self.log_filepath = log_filepath
+            
+            print(f"[LOG] Sistema de logging configurado")
+            print(f"[LOG] Archivo: {log_filename}")
+            print(f"[LOG] Ubicación: {logs_dir}")
+            print(f"[LOG] Ruta completa: {self.log_filepath}")
+            
+            # Verificar que el archivo se creó correctamente
+            if os.path.exists(self.log_filepath):
+                print(f"[LOG] Archivo creado exitosamente")
+            else:
+                print(f"[LOG] ERROR: Archivo no se creó")
+            
+        except Exception as e:
+            print(f"[ERROR] No se pudo configurar el sistema de logging: {e}")
+            self.logger = None
+    
+    def log_info(self, message):
+        """📝 Helper para logging con escritura directa al archivo"""
+        try:
+            if hasattr(self, 'log_filepath') and self.log_filepath:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_line = f"{timestamp} | INFO | {message}\n"
+                with open(self.log_filepath, 'a', encoding='utf-8') as f:
+                    f.write(log_line)
+                    f.flush()
+        except Exception as e:
+            print(f"[LOG_ERROR] No se pudo escribir al log: {e}")
+    
+    def log_warning(self, message):
+        """⚠️ Helper para logging de warnings con escritura directa al archivo"""
+        try:
+            if hasattr(self, 'log_filepath') and self.log_filepath:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_line = f"{timestamp} | WARNING | {message}\n"
+                with open(self.log_filepath, 'a', encoding='utf-8') as f:
+                    f.write(log_line)
+                    f.flush()
+        except Exception as e:
+            print(f"[LOG_ERROR] No se pudo escribir al log: {e}")
     
     def _initialize_agents(self):
-        """Inicializa agentes y entornos según la cantidad configurada"""
-        # Asignar personalidades a agentes (cada agente tiene su propia configuración)
+        """🎲 Inicializa agentes y entornos con personalidades aleatorias sin repetición"""
+        
+        # Intentar cargar personalidades desde checkpoint primero
+        if not self.load_personality_assignments_from_checkpoint():
+            # Si no se pudo cargar, asignar personalidades aleatorias
+            self.assign_random_personalities()
+        
+        # Asignar personalidades a agentes usando las asignaciones aleatorias
         self.agent_personalities = []
         for i in range(self.num_agents):
-            # Usar personalidades cíclicamente si hay más agentes que personalidades
-            personality_idx = i % len(self.reward_personalities)
-            self.agent_personalities.append(self.reward_personalities[personality_idx].copy())
+            personality = self.get_agent_personality(i)
+            self.agent_personalities.append(personality.copy())
         
-        # Configuración global (ya no se usa, cada agente tiene la suya)
-        self.reward_config = self.reward_personalities[0].copy()  # Solo para compatibilidad
+        # Configuración global (solo para compatibilidad)
+        self.reward_config = self.agent_personalities[0].copy()
         
         # Crear entornos y agentes según cantidad configurada
         self.envs = []
@@ -162,7 +270,13 @@ class MultiAgentVisualTrainer:
             env = SnakeEnvironment(render=False, max_steps=self.max_steps, reward_config=personality)
             self.envs.append(env)
             self.agent_names.append(f"{personality['name']}")  # Usar nombre de personalidad
-            print(f"[INIT] Agente {i+1} ({personality['name']}): Food={personality['food']}, Death={personality['death']}")
+            
+            # Mostrar asignación con ID de personalidad
+            personality_id = self.personality_assignments.get(i, i % len(self.reward_personalities))
+            print(f"[INIT] Agente {i+1}: {personality['name']} (ID: {personality_id}) - Food={personality['food']}, Death={personality['death']}")
+            
+            # Log de personalidad asignada
+            self.log_info(f"Agente {i+1}: {personality['name']} (ID: {personality_id}) - Food={personality['food']}, Death={personality['death']}, Direct={personality['direct_movement']}, Efficiency={personality['efficiency_bonus']}")
         
         # Estadísticas por agente (dinámicas según cantidad)
         self.episode = 0
@@ -366,6 +480,8 @@ class MultiAgentVisualTrainer:
                     if self.buttons['start_training'].collidepoint(event.pos):
                         self.training_started = True
                         print("[START] Entrenamiento iniciado por el usuario!")
+                        self.log_info("USUARIO_ACCIÓN - Botón INICIAR presionado")
+                        self.log_info(f"CONFIGURACIÓN_FINAL_CONFIRMADA - Episodios: {self.max_episodes}, Agentes: {self.num_agents}")
                     elif self.buttons['pause'].collidepoint(event.pos):
                         self.paused = not self.paused
                     elif self.buttons['speed_down'].collidepoint(event.pos):
@@ -466,9 +582,11 @@ class MultiAgentVisualTrainer:
                 break
         
         if current_idx < len(step_increments) - 1:
+            old_steps = self.max_steps
             self.max_steps = step_increments[current_idx + 1]
             self.update_all_envs_steps()
             print(f"[CONFIG] Steps máximos aumentados a: {self.max_steps}")
+            self.log_info(f"CONFIGURACIÓN_CAMBIADA - Steps máximos: {old_steps} → {self.max_steps}")
     
     def decrease_steps(self):
         """Disminuye el límite de steps máximos"""
@@ -480,9 +598,11 @@ class MultiAgentVisualTrainer:
                 break
         
         if current_idx > 0:
+            old_steps = self.max_steps
             self.max_steps = step_increments[current_idx - 1]
             self.update_all_envs_steps()
             print(f"[CONFIG] Steps máximos reducidos a: {self.max_steps}")
+            self.log_info(f"CONFIGURACIÓN_CAMBIADA - Steps máximos: {old_steps} → {self.max_steps}")
     
     def update_all_envs_steps(self):
         """Actualiza el límite de steps en todos los entornos"""
@@ -577,6 +697,7 @@ class MultiAgentVisualTrainer:
                     'total_episodes': agent['total_episodes'],
                     'current_score': agent['current_score'],
                     'personality': self.agent_personalities[agent_idx].copy(),
+                    'personality_id': self.personality_assignments.get(agent_idx, agent_idx % len(self.reward_personalities)),
                     'timestamp': timestamp,
                     'manual_save': True
                 }
@@ -592,8 +713,15 @@ class MultiAgentVisualTrainer:
                 print(f"[ERROR] Error guardando agente {agent['name']}: {e}")
         
         print(f"\n[SAVE] {saved_count} modelos guardados exitosamente!")
+        print(f"[INFO] TODOS los {self.num_agents} agentes guardados (no solo top 3)")
         print(f"[INFO] Ubicacion: carpeta '../models/'")
         print(f"[INFO] Timestamp: {timestamp}")
+        
+        # Log del guardado manual
+        if hasattr(self, 'logger') and self.logger:
+            self.logger.info(f"GUARDADO_MANUAL - Episodio {self.episode} - {saved_count} modelos guardados")
+            for rank, agent in enumerate(agents_stats):
+                self.logger.info(f"  Rank {rank+1}: {agent['name']} - Best: {agent['best_score']}, Avg: {agent['avg_score']:.2f}")
     
     def auto_save_checkpoint(self):
         """💾 Guardado automático cada 500 episodios como checkpoint"""
@@ -656,6 +784,7 @@ class MultiAgentVisualTrainer:
                     'total_episodes': agent['total_episodes'],
                     'current_score': agent['current_score'],
                     'personality': self.agent_personalities[agent_idx].copy(),
+                    'personality_id': self.personality_assignments.get(agent_idx, agent_idx % len(self.reward_personalities)),
                     'timestamp': timestamp,
                     'checkpoint_save': True,
                     'training_progress': self.episode / self.max_episodes
@@ -671,10 +800,17 @@ class MultiAgentVisualTrainer:
                 print(f"[ERROR] Error en checkpoint agente {agent['name']}: {e}")
         
         print(f"[CHECKPOINT] {saved_count} modelos guardados como checkpoint!")
+        print(f"[CHECKPOINT] TODOS los {self.num_agents} agentes guardados (no solo top 3)")
         if self.max_episodes != float('inf'):
             print(f"[INFO] Progreso: {self.episode}/{self.max_episodes} ({100*self.episode/self.max_episodes:.1f}%)")
         else:
             print(f"[INFO] Episodio actual: {self.episode} (MODO INFINITO)")
+        
+        # Log del checkpoint automático
+        if hasattr(self, 'logger') and self.logger:
+            self.logger.info(f"CHECKPOINT_AUTOMATICO - Episodio {self.episode} - {saved_count} modelos guardados")
+            progress = f"{100*self.episode/self.max_episodes:.1f}%" if self.max_episodes != float('inf') else "INFINITO"
+            self.logger.info(f"  Progreso: {progress}")
     
     def load_checkpoint_dialog(self):
         """🆕 Muestra interfaz gráfica para seleccionar checkpoint con mouse"""
@@ -1104,7 +1240,7 @@ class MultiAgentVisualTrainer:
         print("="*80)
         
         # Información general
-        print(f"🕒 Tiempo de entrenamiento: {timedelta(seconds=int(training_time))} ({self.format_training_time()})")
+        print(f"[TIEMPO] Tiempo de entrenamiento: {timedelta(seconds=int(training_time))} ({self.format_training_time()})")
         print(f"Episodios completados: {self.episode}")
         if self.max_episodes != float('inf'):
             print(f"Progreso: {self.episode}/{self.max_episodes} ({100*self.episode/self.max_episodes:.1f}%)")
@@ -1153,9 +1289,9 @@ class MultiAgentVisualTrainer:
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Guardar top 3 agentes
+        # Guardar TODOS los agentes (no solo top 3)
         saved_count = 0
-        for pos, agent in enumerate(agent_stats[:3], 1):
+        for pos, agent in enumerate(agent_stats, 1):
             try:
                 agent_idx = agent['index']
                 filename = os.path.join(models_dir, f"snake_model_ep{self.episode:05d}_rank{pos:02d}_{agent['name']}_score{agent['best_score']:03d}_{timestamp}.pth")
@@ -1183,6 +1319,7 @@ class MultiAgentVisualTrainer:
                 print(f"[ERROR] Error guardando {agent['name']}: {e}")
         
         print(f"\n[STOP] {saved_count} modelos guardados al parar entrenamiento!")
+        print(f"[INFO] TODOS los {self.num_agents} agentes guardados (no solo top 3)")
         print(f"[INFO] Ubicacion: carpeta '../models/'")
         print("="*80)
     
@@ -1198,11 +1335,14 @@ class MultiAgentVisualTrainer:
                 break
         
         if current_idx < len(episode_increments) - 1:
+            old_episodes = self.max_episodes
             self.max_episodes = episode_increments[current_idx + 1]
             if self.max_episodes == float('inf'):
                 print(f"[CONFIG] Modo INFINITO activado - Sin limite de episodios")
+                self.log_info(f"CONFIGURACIÓN_CAMBIADA - Episodios: {old_episodes} → INFINITO")
             else:
                 print(f"[CONFIG] Tope de episodios aumentado a: {self.max_episodes}")
+                self.log_info(f"CONFIGURACIÓN_CAMBIADA - Episodios: {old_episodes} → {self.max_episodes}")
     
     def decrease_episodes(self):
         """Disminuye el tope de episodios (mínimo 1000)"""
@@ -1216,8 +1356,10 @@ class MultiAgentVisualTrainer:
                 break
         
         if current_idx > 0:  # No bajar de 1000 (índice 0)
+            old_episodes = self.max_episodes
             self.max_episodes = episode_increments[current_idx - 1]
             print(f"[CONFIG] Tope de episodios reducido a: {self.max_episodes}")
+            self.log_info(f"CONFIGURACIÓN_CAMBIADA - Episodios: {old_episodes} → {self.max_episodes}")
     
     def increase_agents(self):
         """Aumenta la cantidad de agentes (máximo 12) - Solo antes del entrenamiento"""
@@ -1226,8 +1368,10 @@ class MultiAgentVisualTrainer:
             return
             
         if self.num_agents < self.max_agents:
+            old_agents = self.num_agents
             self.num_agents += 1
             print(f"[CONFIG] Cantidad de agentes aumentada a: {self.num_agents}")
+            self.log_info(f"CONFIGURACIÓN_CAMBIADA - Agentes: {old_agents} → {self.num_agents}")
             # Reinicializar agentes con nueva cantidad
             self._initialize_agents()
             # Actualizar layout para reflejar cambios
@@ -1242,8 +1386,10 @@ class MultiAgentVisualTrainer:
             return
             
         if self.num_agents > self.min_agents:
+            old_agents = self.num_agents
             self.num_agents -= 1
             print(f"[CONFIG] Cantidad de agentes reducida a: {self.num_agents}")
+            self.log_info(f"CONFIGURACIÓN_CAMBIADA - Agentes: {old_agents} → {self.num_agents}")
             # Reinicializar agentes con nueva cantidad
             self._initialize_agents()
             # Actualizar layout para reflejar cambios
@@ -1476,6 +1622,279 @@ class MultiAgentVisualTrainer:
         seconds = int(self.current_training_time % 60)
         
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    
+    def assign_random_personalities(self):
+        """🎲 Asigna personalidades aleatorias sin repetición a los agentes"""
+        print(f"\n[PERSONALIDADES] Asignando personalidades aleatorias para {self.num_agents} agentes...")
+        
+        # Obtener personalidades disponibles (las que no han sido usadas)
+        available_personalities = []
+        for i, personality in enumerate(self.reward_personalities):
+            if i not in self.used_personalities:
+                available_personalities.append((i, personality))
+        
+        # Si no hay suficientes personalidades disponibles, resetear
+        if len(available_personalities) < self.num_agents:
+            print(f"[PERSONALIDADES] Solo {len(available_personalities)} personalidades disponibles para {self.num_agents} agentes")
+            print(f"[PERSONALIDADES] Reseteando personalidades usadas para permitir reutilización")
+            self.used_personalities.clear()
+            available_personalities = [(i, personality) for i, personality in enumerate(self.reward_personalities)]
+        
+        # Seleccionar personalidades aleatorias sin repetición
+        import random
+        selected_personalities = random.sample(available_personalities, self.num_agents)
+        
+        # Asignar personalidades a agentes
+        for agent_idx, (personality_idx, personality) in enumerate(selected_personalities):
+            self.personality_assignments[agent_idx] = personality_idx
+            self.used_personalities.add(personality_idx)
+            print(f"[PERSONALIDADES] Agente {agent_idx+1}: {personality['name']} (ID: {personality_idx})")
+        
+        print(f"[PERSONALIDADES] Personalidades asignadas exitosamente!")
+        print(f"[PERSONALIDADES] Personalidades usadas en esta sesión: {len(self.used_personalities)}/24")
+    
+    def get_agent_personality(self, agent_idx):
+        """🎭 Obtiene la personalidad asignada a un agente específico"""
+        if agent_idx in self.personality_assignments:
+            personality_idx = self.personality_assignments[agent_idx]
+            return self.reward_personalities[personality_idx]
+        else:
+            # Fallback: usar personalidad por índice (compatibilidad)
+            personality_idx = agent_idx % len(self.reward_personalities)
+            return self.reward_personalities[personality_idx]
+    
+    def load_personality_assignments_from_checkpoint(self, checkpoint_dir=None):
+        """🎭 Carga asignaciones de personalidades desde modelos guardados"""
+        import os
+        import torch
+        
+        # Usar directorio correcto en la raíz del proyecto
+        if checkpoint_dir is None:
+            checkpoint_dir = os.path.join(os.path.dirname(__file__), '..', 'models')
+        
+        print(f"\n[LOAD] Buscando modelos guardados para cargar personalidades...")
+        
+        # Buscar archivos de modelo
+        model_files = []
+        if os.path.exists(checkpoint_dir):
+            for filename in os.listdir(checkpoint_dir):
+                if filename.endswith('.pth'):
+                    model_files.append(os.path.join(checkpoint_dir, filename))
+        
+        if not model_files:
+            print(f"[LOAD] No se encontraron modelos guardados en {checkpoint_dir}")
+            return False
+        
+        # Ordenar por fecha de modificación (más reciente primero)
+        model_files.sort(key=os.path.getmtime, reverse=True)
+        
+        # Intentar cargar personalidades desde el modelo más reciente
+        loaded_personalities = {}
+        for model_file in model_files[:self.num_agents]:  # Solo cargar tantos como agentes
+            try:
+                checkpoint = torch.load(model_file, map_location='cpu')
+                
+                # Verificar si tiene información de personalidad
+                if 'personality_id' in checkpoint and 'agent_name' in checkpoint:
+                    # Extraer índice del agente desde el nombre del archivo o usar contador
+                    agent_idx = len(loaded_personalities)
+                    if agent_idx < self.num_agents:
+                        personality_id = checkpoint['personality_id']
+                        personality_name = checkpoint['agent_name']
+                        
+                        loaded_personalities[agent_idx] = personality_id
+                        self.used_personalities.add(personality_id)
+                        
+                        print(f"[LOAD] Agente {agent_idx+1}: {personality_name} (ID: {personality_id}) - desde {os.path.basename(model_file)}")
+                
+            except Exception as e:
+                print(f"[LOAD] Error cargando {os.path.basename(model_file)}: {e}")
+                continue
+        
+        if loaded_personalities:
+            self.personality_assignments = loaded_personalities
+            self.loaded_from_checkpoint = True
+            print(f"[LOAD] Cargadas {len(loaded_personalities)} asignaciones de personalidades desde checkpoint")
+            print(f"[LOAD] Personalidades usadas: {len(self.used_personalities)}/24")
+            return True
+        else:
+            print(f"[LOAD] No se pudieron cargar personalidades desde checkpoint")
+            return False
+    
+    def emergency_checkpoint_save(self):
+        """🆘 Guarda checkpoint de emergencia automáticamente"""
+        try:
+            import torch
+            import os
+            from datetime import datetime
+            
+            print(f"\n[EMERGENCY] Guardando checkpoint de emergencia...")
+            
+            # Crear directorio si no existe en la raíz del proyecto
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            emergency_dir = os.path.join(current_dir, '..', 'models', 'emergency')
+            os.makedirs(emergency_dir, exist_ok=True)
+            
+            # Timestamp para el archivo
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Guardar solo los mejores agentes para velocidad
+            agents_stats = []
+            for i in range(self.num_agents):
+                if len(self.agent_scores[i]) > 0:
+                    recent_scores = self.agent_scores[i][-10:] if len(self.agent_scores[i]) >= 10 else self.agent_scores[i]
+                    avg_score = sum(recent_scores) / len(recent_scores)
+                    
+                    agents_stats.append({
+                        'index': i,
+                        'name': self.agent_names[i],
+                        'best_score': self.agent_best_scores[i],
+                        'avg_score': avg_score,
+                        'total_episodes': len(self.agent_scores[i])
+                    })
+            
+            # Ordenar por mejor score
+            agents_stats.sort(key=lambda x: x['best_score'], reverse=True)
+            
+            # Guardar top 6 agentes para velocidad
+            saved_count = 0
+            for rank, agent in enumerate(agents_stats[:6]):
+                try:
+                    agent_idx = agent['index']
+                    
+                    filename = os.path.join(emergency_dir, f"emergency_ep{self.episode:05d}_rank{rank+1:02d}_{agent['name']}_score{agent['best_score']:03d}_{timestamp}.pth")
+                    
+                    save_data = {
+                        'model_state_dict': self.agents[agent_idx].policy_net.state_dict(),
+                        'episode': self.episode,
+                        'rank': rank + 1,
+                        'agent_name': agent['name'],
+                        'best_score': agent['best_score'],
+                        'avg_score': agent['avg_score'],
+                        'total_episodes': agent['total_episodes'],
+                        'personality': self.agent_personalities[agent_idx].copy(),
+                        'personality_id': self.personality_assignments.get(agent_idx, agent_idx % len(self.reward_personalities)),
+                        'timestamp': timestamp,
+                        'emergency_save': True,
+                        'session_id': self.session_id
+                    }
+                    
+                    torch.save(save_data, filename)
+                    saved_count += 1
+                    
+                except Exception as e:
+                    print(f"[EMERGENCY] Error guardando agente {agent['name']}: {e}")
+                    continue
+            
+            print(f"[EMERGENCY] Checkpoint de emergencia completado: {saved_count} modelos guardados")
+            print(f"[EMERGENCY] Ubicación: {emergency_dir}")
+            self.last_emergency_save = time.time()
+            
+        except Exception as e:
+            print(f"[EMERGENCY] Error en checkpoint de emergencia: {e}")
+    
+    def setup_emergency_handlers(self):
+        """🆘 Configura manejadores de emergencia para cierre abrupto"""
+        def emergency_handler(signum=None, frame=None):
+            print(f"\n[EMERGENCY] Señal de cierre detectada, guardando checkpoint...")
+            self.emergency_checkpoint_save()
+            
+            # Limpiar recursos
+            if hasattr(self, 'process_pool') and self.process_pool:
+                self.process_pool.shutdown(wait=False)
+            
+            print(f"[EMERGENCY] Checkpoint de emergencia completado, cerrando...")
+            sys.exit(0)
+        
+        # Registrar manejadores de señales
+        try:
+            signal.signal(signal.SIGINT, emergency_handler)  # Ctrl+C
+            signal.signal(signal.SIGTERM, emergency_handler)  # Terminación
+            if hasattr(signal, 'SIGBREAK'):  # Windows
+                signal.signal(signal.SIGBREAK, emergency_handler)
+        except Exception as e:
+            print(f"[EMERGENCY] No se pudieron registrar manejadores de señales: {e}")
+        
+        # Registrar atexit como respaldo (sin sys.exit para evitar conflictos)
+        def safe_emergency_handler():
+            try:
+                print(f"[EMERGENCY] Atexit callback ejecutado")
+                self.emergency_checkpoint_save()
+                if hasattr(self, 'process_pool') and self.process_pool:
+                    self.process_pool.shutdown(wait=False)
+                print(f"[EMERGENCY] Cleanup completado")
+            except Exception as e:
+                print(f"[EMERGENCY] Error en atexit callback: {e}")
+        
+        atexit.register(safe_emergency_handler)
+        
+        print(f"[EMERGENCY] Manejadores de emergencia configurados")
+    
+    def check_emergency_save(self):
+        """🆘 Verifica si es hora de hacer checkpoint de emergencia automático"""
+        if not self.emergency_save_enabled:
+            return
+        
+        current_time = time.time()
+        if current_time - self.last_emergency_save >= self.emergency_save_interval:
+            self.emergency_checkpoint_save()
+    
+    def train_agent_async(self, agent_idx, total_reward, steps):
+        """🧠 Entrena un agente de forma asíncrona"""
+        try:
+            # Entrenar el agente
+            loss = self.agents[agent_idx].finish_episode(total_reward, steps)
+            
+            # Actualizar estadísticas
+            score = self.envs[agent_idx].score
+            self.agent_scores[agent_idx].append(score)
+            self.agent_rewards[agent_idx].append(total_reward)
+            self.agent_total_food[agent_idx] += score
+            self.agent_total_episodes[agent_idx] += 1
+            
+            if score > self.agent_best_scores[agent_idx]:
+                self.agent_best_scores[agent_idx] = score
+                self.agent_best_episode[agent_idx] = self.episode
+            
+            return agent_idx, loss, score
+        except Exception as e:
+            print(f"[ERROR] Error entrenando agente {agent_idx}: {e}")
+            return agent_idx, 0.0, 0
+    
+    def process_training_queue(self):
+        """🧠 Procesa la cola de entrenamiento en paralelo"""
+        if not self.training_queue or not self.parallel_training:
+            return
+        
+        # Inicializar thread pool si no existe
+        if self.process_pool is None and len(self.training_queue) > 0:
+            max_workers = min(self.cpu_cores, len(self.training_queue))
+            self.process_pool = ThreadPoolExecutor(max_workers=max_workers)
+        
+        # Procesar agentes en la cola
+        while self.training_queue and len(self.training_in_progress) < self.cpu_cores:
+            agent_data = self.training_queue.pop(0)
+            agent_idx, total_reward, steps = agent_data
+            
+            if agent_idx not in self.training_in_progress:
+                self.training_in_progress.add(agent_idx)
+                
+                # Entrenar de forma asíncrona
+                future = self.process_pool.submit(self.train_agent_async, agent_idx, total_reward, steps)
+                
+                # Callback para cuando termine
+                def training_complete(fut, idx=agent_idx):
+                    try:
+                        result = fut.result()
+                        self.training_in_progress.discard(idx)
+                        if self.episode % 10 == 0:  # Debug cada 10 episodios
+                            agent_idx, loss, score = result
+                            print(f"[ASYNC] Agente {agent_idx+1} entrenado - Loss: {loss:.4f}, Score: {score}")
+                    except Exception as e:
+                        self.training_in_progress.discard(idx)
+                        print(f"[ERROR] Error en callback de entrenamiento: {e}")
+                
+                future.add_done_callback(training_complete)
     
     def draw_controls(self):
         """Dibuja los controles organizados en 2 filas con etiquetas"""
@@ -2065,6 +2484,12 @@ class MultiAgentVisualTrainer:
             # 🕒 Actualizar tiempo transcurrido de entrenamiento
             self.update_training_time()
             
+            # 🧠 Procesar cola de entrenamiento paralelo - DESACTIVADO TEMPORALMENTE
+            # self.process_training_queue()
+            
+            # 🆘 Verificar checkpoint de emergencia automático
+            self.check_emergency_save()
+            
             # 🚀 PROCESAMIENTO OPTIMIZADO PERO SIEMPRE CON RENDERIZADO COMPLETO
             self.ultra_fast_mode = False  # SIEMPRE mostrar renderizado completo
             
@@ -2087,8 +2512,24 @@ class MultiAgentVisualTrainer:
                     # Ejecutar acción
                     new_state, reward, done, info = self.envs[i].step(action)
                     
+                    # Debug crítico: verificar si se están acumulando experiencias (CADA 10 EPISODIOS)
+                    if self.episode % 10 == 0 and i == 0 and steps[i] == 1:  # Solo agente 1, primer step cada 10 episodios
+                        rewards_before = len(self.agents[i].rewards)
+                        log_probs_before = len(self.agents[i].log_probs)
+                        print(f"[DEBUG_INICIO_EP] Ep {self.episode} - Agente 1 inicia con: {rewards_before} rewards, {log_probs_before} log_probs")
+                    
                     # Guardar recompensa
                     self.agents[i].store_reward(reward)
+                    
+                    # Debug crítico: verificar después de guardar (CADA 10 EPISODIOS)
+                    if self.episode % 10 == 0 and i == 0 and steps[i] <= 3:  # Primeros 3 steps
+                        rewards_after = len(self.agents[i].rewards)
+                        log_probs_after = len(self.agents[i].log_probs)
+                        print(f"[DEBUG_EXPERIENCIAS] Ep {self.episode} Step {steps[i]} - Agente 1: {rewards_after} rewards, {log_probs_after} log_probs | Reward: {reward:.3f} | Done: {done}")
+                        
+                        # CRÍTICO: Verificar si las listas están sincronizadas
+                        if len(self.agents[i].rewards) != len(self.agents[i].log_probs):
+                            print(f"[ERROR_CRITICO] DESINCRONIZACIÓN: {len(self.agents[i].rewards)} rewards != {len(self.agents[i].log_probs)} log_probs")
                     
                     # Actualizar estado (sin debug para velocidad)
                     states[i] = new_state
@@ -2135,6 +2576,11 @@ class MultiAgentVisualTrainer:
                     
                     if done:
                         done_flags[i] = True
+                        
+                        # 🧠 ENTRENAMIENTO PARALELO: DESACTIVADO TEMPORALMENTE
+                        # TODO: Reimplementar sin conflictos de gradientes
+                        # if self.parallel_training and i not in self.training_in_progress:
+                        #     self.training_queue.append((i, total_rewards[i], steps[i]))
                     
                     # Actualizar estadísticas
                     self.current_episode_scores[i] = info['score']
@@ -2172,30 +2618,130 @@ class MultiAgentVisualTrainer:
                 # VELOCIDAD CONSTANTE - exactamente la configurada por el usuario
                 self.clock.tick(current_speed)
         
-        # Finalizar episodios y actualizar estadísticas
+        # 🚀 FINALIZACIÓN SEGURA - SIN CONFLICTOS DE GRADIENTES
         losses = []
+        
+        # DESACTIVAR ENTRENAMIENTO PARALELO TEMPORALMENTE PARA EVITAR CONFLICTOS
+        # TODO: Implementar entrenamiento paralelo sin conflictos de gradientes
+        
+        # 🧠 ENTRENAR TODOS LOS AGENTES DE FORMA SECUENCIAL Y SEGURA
+        total_trained = 0
+        
         for i in range(self.num_agents):
-            loss = self.agents[i].finish_episode(total_rewards[i], steps[i])
-            losses.append(loss)
+            try:
+                # Limpiar gradientes antes de entrenar para evitar conflictos
+                self.agents[i].policy_net.zero_grad()
+                
+                # Entrenamiento seguro
+                loss = self.agents[i].finish_episode(total_rewards[i], steps[i])
+                losses.append(loss)
+                
+                # Debug detallado para entender el problema
+                rewards_count = len(self.agents[i].rewards) if hasattr(self.agents[i], 'rewards') else 0
+                log_probs_count = len(self.agents[i].log_probs) if hasattr(self.agents[i], 'log_probs') else 0
+                
+                # Calcular métricas de aprendizaje
+                total_reward_episode = total_rewards[i]
+                steps_episode = steps[i]
+                score_episode = self.envs[i].score
+                
+                # Calcular progreso de aprendizaje
+                recent_scores = self.agent_scores[i][-10:] if len(self.agent_scores[i]) >= 10 else self.agent_scores[i]
+                avg_recent_score = sum(recent_scores) / len(recent_scores) if recent_scores else 0
+                is_improving = score_episode > avg_recent_score if recent_scores else False
+                
+                if loss > 0:
+                    total_trained += 1
+                    if self.episode % 10 == 0:  # Debug cada 10 episodios
+                        print(f"[TRAIN] Agente {i+1} entrenado - Loss: {loss:.4f}, Rewards: {rewards_count}, LogProbs: {log_probs_count}")
+                        # Log detallado con métricas de aprendizaje
+                        self.log_info(f"APRENDIZAJE_ACTIVO - Ep {self.episode} - Agente {i+1} ({self.agent_names[i]})")
+                        self.log_info(f"  ├─ Loss: {loss:.4f} | Experiencias: {rewards_count} rewards, {log_probs_count} acciones")
+                        self.log_info(f"  ├─ Episodio: Score={score_episode}, Steps={steps_episode}, Reward_total={total_reward_episode:.2f}")
+                        self.log_info(f"  ├─ Progreso: Promedio_últimos_10={avg_recent_score:.2f}, Mejorando={'SÍ' if is_improving else 'NO'}")
+                        self.log_info(f"  └─ Estado: ENTRENANDO CORRECTAMENTE ✓")
+                else:
+                    # Debug cuando NO entrena para entender por qué
+                    if self.episode % 10 == 0:
+                        print(f"[DEBUG] Agente {i+1} NO entrenó - Rewards: {rewards_count}, LogProbs: {log_probs_count}, Score: {self.envs[i].score}")
+                        # Log de problemas con diagnóstico
+                        problema = "SIN_EXPERIENCIAS" if rewards_count == 0 else "SIN_ACCIONES" if log_probs_count == 0 else "LOSS_CERO"
+                        self.log_warning(f"PROBLEMA_APRENDIZAJE - Ep {self.episode} - Agente {i+1} ({self.agent_names[i]})")
+                        self.log_warning(f"  ├─ Problema: {problema}")
+                        self.log_warning(f"  ├─ Diagnóstico: {rewards_count} rewards, {log_probs_count} acciones, Loss={loss:.4f}")
+                        self.log_warning(f"  ├─ Episodio: Score={score_episode}, Steps={steps_episode}")
+                        self.log_warning(f"  └─ Estado: NO ESTÁ APRENDIENDO ✗")
+                
+                # Actualizar estadísticas
+                score = self.envs[i].score
+                self.agent_scores[i].append(score)
+                self.agent_rewards[i].append(total_rewards[i])
+                self.agent_total_food[i] += score
+                self.agent_total_episodes[i] += 1
+                
+                if score > self.agent_best_scores[i]:
+                    self.agent_best_scores[i] = score
+                    self.agent_best_episode[i] = self.episode
+                    
+            except Exception as e:
+                print(f"[ERROR] Error entrenando agente {i+1}: {e}")
+                losses.append(0.0)
+                # Limpiar gradientes en caso de error
+                try:
+                    self.agents[i].policy_net.zero_grad()
+                except:
+                    pass
+        
+        # Debug solo cada 10 episodios para no ralentizar
+        if self.episode % 10 == 0:
+            loss_avg = sum(losses) / len(losses) if losses else 0
+            scores = [self.envs[i].score for i in range(self.num_agents)]
+            print(f"[TRAIN] Ep {self.episode} - Agentes entrenados: {total_trained}/{self.num_agents}, Loss promedio: {loss_avg:.4f}, Scores: {scores}")
             
-            # Debug del entrenamiento mejorado
-            if i == 0:  # Solo agente 0
-                rewards_len = len(self.agents[i].rewards) if hasattr(self.agents[i], 'rewards') else 0
-                log_probs_len = len(self.agents[i].log_probs) if hasattr(self.agents[i], 'log_probs') else 0
-                print(f"[TRAIN] Ep {self.episode} - Agente 1: Loss={loss:.4f}, TotalReward={total_rewards[i]:.2f}, Steps={steps[i]}, RewardsStored={rewards_len}, LogProbs={log_probs_len}")
+            # Log resumen cada 10 episodios con métricas de aprendizaje
+            # Calcular métricas de aprendizaje del episodio
+            agents_learning = total_trained
+            agents_not_learning = self.num_agents - total_trained
+            learning_rate = (total_trained / self.num_agents) * 100
             
-            # Actualizar estadísticas
-            score = self.envs[i].score
-            self.agent_scores[i].append(score)
-            self.agent_rewards[i].append(total_rewards[i])
+            # Calcular progreso general
+            total_score_episode = sum(scores)
+            avg_score_episode = total_score_episode / self.num_agents
             
-            # Estadísticas adicionales
-            self.agent_total_food[i] += score  # score = manzanas comidas
-            self.agent_total_episodes[i] += 1
-            
-            if score > self.agent_best_scores[i]:
-                self.agent_best_scores[i] = score
-                self.agent_best_episode[i] = self.episode
+            self.log_info(f"RESUMEN_APRENDIZAJE - Episodio {self.episode}")
+            self.log_info(f"  ├─ Agentes entrenando: {agents_learning}/{self.num_agents} ({learning_rate:.1f}%)")
+            self.log_info(f"  ├─ Agentes con problemas: {agents_not_learning}")
+            self.log_info(f"  ├─ Loss promedio: {loss_avg:.4f}")
+            self.log_info(f"  ├─ Score total episodio: {total_score_episode}")
+            self.log_info(f"  ├─ Score promedio: {avg_score_episode:.2f}")
+            self.log_info(f"  └─ Scores individuales: {scores}")
+                
+            # Log estadísticas detalladas cada 50 episodios
+            if self.episode % 50 == 0:
+                self.log_info(f"ANÁLISIS_PROGRESO - Episodio {self.episode}")
+                
+                for i in range(self.num_agents):
+                    recent_scores = self.agent_scores[i][-10:] if len(self.agent_scores[i]) >= 10 else self.agent_scores[i]
+                    avg_recent = sum(recent_scores) / len(recent_scores) if recent_scores else 0
+                    best_score = self.agent_best_scores[i]
+                    total_episodes = len(self.agent_scores[i])
+                    
+                    # Calcular tendencia
+                    if len(recent_scores) >= 5:
+                        first_half = recent_scores[:len(recent_scores)//2]
+                        second_half = recent_scores[len(recent_scores)//2:]
+                        trend = "MEJORANDO" if sum(second_half) > sum(first_half) else "ESTABLE/DECLINANDO"
+                    else:
+                        trend = "INSUFICIENTES_DATOS"
+                    
+                    self.log_info(f"    Agente {i+1} ({self.agent_names[i]}):")
+                    self.log_info(f"      ├─ Mejor score: {best_score}")
+                    self.log_info(f"      ├─ Promedio últimos 10: {avg_recent:.2f}")
+                    self.log_info(f"      ├─ Total episodios: {total_episodes}")
+                    self.log_info(f"      └─ Tendencia: {trend}")
+                    
+        elif total_trained > 0:
+            print(f"[TRAIN] Ep {self.episode} - {total_trained} agentes entrenados exitosamente")
         
         return total_rewards, steps, losses, [env.score for env in self.envs]
     
@@ -2208,6 +2754,23 @@ class MultiAgentVisualTrainer:
             self.max_episodes = num_episodes
             
         self.training_start_time = time.time()
+        
+        # Log inicio del entrenamiento con configuración final
+        self.log_info("-" * 80)
+        self.log_info("ENTRENAMIENTO INICIADO - SISTEMA CORREGIDO")
+        self.log_info("-" * 80)
+        self.log_info(f"Configuración final utilizada:")
+        self.log_info(f"  ├─ Número de episodios: {num_episodes}")
+        self.log_info(f"  ├─ Modo: {'INFINITO' if num_episodes == float('inf') else 'LIMITADO'}")
+        self.log_info(f"  ├─ Número de agentes: {self.num_agents}")
+        self.log_info(f"  ├─ Máximo steps por episodio: {self.max_steps}")
+        self.log_info(f"  └─ Tiempo de inicio: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.log_info("CORRECCIONES APLICADAS:")
+        self.log_info("  ├─ ✅ Sistema de recompensas balanceado (comida +100, muerte -20)")
+        self.log_info("  ├─ ✅ Bonus por supervivencia implementado (+0.05 por step)")
+        self.log_info("  ├─ ✅ Personalidades menos punitivas")
+        self.log_info("  ├─ ✅ Debug de experiencias mejorado")
+        self.log_info("  └─ ✅ Incentivos para buscar manzanas en lugar de morir")
         
         # Bucle de espera hasta que el usuario presione INICIAR
         print("Esperando que el usuario presione INICIAR...")
@@ -2253,6 +2816,20 @@ class MultiAgentVisualTrainer:
                     print(f"[INFO] Entrenamiento detenido - Alcanzado tope de episodios: {self.max_episodes}")
                     break
                 
+                # Debug para modo infinito
+                if num_episodes == float('inf') and episode % 100 == 0:
+                    print(f"[INFINITO] Episodio {episode} - Modo infinito activo (max_episodes: {self.max_episodes})")
+                
+                # Log de diagnóstico de experiencias cada 100 episodios
+                if episode % 100 == 0 and hasattr(self, 'logger') and self.logger:
+                    self.logger.info(f"DIAGNÓSTICO_EXPERIENCIAS - Episodio {episode}")
+                    for i in range(self.num_agents):
+                        rewards_count = len(self.agents[i].rewards) if hasattr(self.agents[i], 'rewards') else 0
+                        log_probs_count = len(self.agents[i].log_probs) if hasattr(self.agents[i], 'log_probs') else 0
+                        states_count = len(self.agents[i].states) if hasattr(self.agents[i], 'states') else 0
+                        
+                        self.logger.info(f"    Agente {i+1} ({self.agent_names[i]}): {rewards_count} rewards, {log_probs_count} acciones, {states_count} estados")
+                
                 # Entrenar episodio
                 result = self.train_episode()
                 if result is None:  # Usuario cerró ventana o presionó STOP
@@ -2275,10 +2852,41 @@ class MultiAgentVisualTrainer:
         # Mostrar resumen final
         self.show_final_summary()
         
-        # Limpiar process pool
+        # Log final del entrenamiento
+        if hasattr(self, 'logger') and self.logger:
+            training_time = time.time() - self.training_start_time if self.training_start_time else 0
+            self.logger.info("-" * 80)
+            self.logger.info("ENTRENAMIENTO FINALIZADO")
+            self.logger.info("-" * 80)
+            self.logger.info(f"Episodios completados: {self.episode}")
+            self.logger.info(f"Tiempo total: {datetime.timedelta(seconds=int(training_time))}")
+            self.logger.info(f"Tiempo de finalización: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # Estadísticas finales
+            best_scores = [self.agent_best_scores[i] for i in range(self.num_agents)]
+            total_food = sum(sum(scores) for scores in self.agent_scores)
+            total_episodes_all = sum(len(scores) for scores in self.agent_scores)
+            
+            self.logger.info("ESTADÍSTICAS FINALES:")
+            self.logger.info(f"  Mejores scores por agente: {best_scores}")
+            self.logger.info(f"  Total de comida recolectada: {total_food}")
+            self.logger.info(f"  Total de episodios jugados: {total_episodes_all}")
+            self.logger.info(f"  Promedio general: {total_food / max(total_episodes_all, 1):.2f}")
+            
+            # Cerrar el logger
+            for handler in self.logger.handlers:
+                handler.close()
+            self.logger.handlers.clear()
+        
+        # Limpiar process pool y cola de entrenamiento
         if self.process_pool:
             self.process_pool.shutdown(wait=True)
             print("[MULTI-CORE] Process pool cerrado")
+        
+        # Limpiar cola de entrenamiento
+        self.training_queue.clear()
+        self.training_in_progress.clear()
+        print("[PARALLEL] Cola de entrenamiento limpiada")
         
         pygame.quit()
         print("Entrenamiento completado!")
@@ -2306,7 +2914,7 @@ class MultiAgentVisualTrainer:
         print("="*80)
         
         # Información general
-        print(f"🕒 Tiempo total de entrenamiento: {datetime.timedelta(seconds=int(training_time))} ({self.format_training_time()})")
+        print(f"[TIEMPO] Tiempo total de entrenamiento: {datetime.timedelta(seconds=int(training_time))} ({self.format_training_time()})")
         print(f"Episodios completados: {self.episode}")
         print(f"Configuracion de recompensas utilizada:")
         print(f"   • Food: {self.reward_config['food']}")
@@ -2357,8 +2965,8 @@ class MultiAgentVisualTrainer:
         
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Guardar top 3 agentes con nomenclatura unificada
-        for pos, agent in enumerate(agent_stats[:3], 1):
+        # Guardar TODOS los agentes con nomenclatura unificada
+        for pos, agent in enumerate(agent_stats, 1):
             agent_idx = agent_stats.index(agent)
             filename = os.path.join(models_dir, f"snake_model_ep{self.episode:05d}_rank{pos:02d}_{agent['name']}_score{agent['best_score']:03d}_{timestamp}.pth")
             
@@ -2386,6 +2994,10 @@ class MultiAgentVisualTrainer:
         total_food_all = sum(sum(scores) for scores in self.agent_scores)
         total_episodes_all = sum(len(scores) for scores in self.agent_scores)
         
+        print(f"MODELOS GUARDADOS:")
+        print(f"   TODOS los {self.num_agents} agentes guardados (no solo top 3)")
+        print(f"   Ubicación: carpeta '../models/'")
+        print()
         print(f"ESTADISTICAS GENERALES:")
         print(f"   Total de manzanas comidas: {total_food_all}")
         print(f"   Total de episodios jugados: {total_episodes_all}")
