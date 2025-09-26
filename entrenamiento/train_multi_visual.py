@@ -74,11 +74,11 @@ class MultiAgentVisualTrainer:
         self.max_agents = 12  # Máximo permitido
         
         # 📐 DIMENSIONES CONFIGURABLES DEL ENTORNO
-        self.grid_width = 25   # Ancho del tablero (mínimo 10, máximo 50)
-        self.grid_height = 20  # Alto del tablero (mínimo 8, máximo 40)
-        self.min_grid_width = 10
+        self.grid_width = 25   # Ancho del tablero (mínimo 5, máximo 50)
+        self.grid_height = 20  # Alto del tablero (mínimo 5, máximo 40)
+        self.min_grid_width = 5
         self.max_grid_width = 50
-        self.min_grid_height = 8
+        self.min_grid_height = 5
         self.max_grid_height = 40
         
         # 🚀 CONFIGURACIÓN MULTI-NÚCLEO PARA FPS REALES
@@ -112,6 +112,7 @@ class MultiAgentVisualTrainer:
         self.GRAY = (128, 128, 128)
         self.LIGHT_GRAY = (200, 200, 200)
         self.DARK_GRAY = (64, 64, 64)
+        self.LIGHT_BLUE = (173, 216, 230)
         self.DARK_GREEN = (0, 150, 0)
         self.YELLOW = (255, 255, 0)
         self.ORANGE = (255, 165, 0)
@@ -288,10 +289,10 @@ class MultiAgentVisualTrainer:
             
             # Mostrar asignación con ID de personalidad
             personality_id = self.personality_assignments.get(i, i % len(self.reward_personalities))
-            print(f"[INIT] Agente {i+1}: {personality['name']} (ID: {personality_id}) - Food={personality['food']}, Death={personality['death']}")
+            print(f"[INIT] Agente {i+1}: {personality['name']} (ID: {personality_id}) - Food={personality['food']}, Death={personality['death']}, Grid={env.grid_width}x{env.grid_height}")
             
             # Log de personalidad asignada
-            self.log_info(f"Agente {i+1}: {personality['name']} (ID: {personality_id}) - Food={personality['food']}, Death={personality['death']}, Direct={personality['direct_movement']}, Efficiency={personality['efficiency_bonus']}")
+            self.log_info(f"Agente {i+1}: {personality['name']} (ID: {personality_id}) - Food={personality['food']}, Death={personality['death']}, Direct={personality['direct_movement']}, Efficiency={personality['efficiency_bonus']}, Grid={env.grid_width}x{env.grid_height}")
         
         # Estadísticas por agente (dinámicas según cantidad)
         self.episode = 0
@@ -406,20 +407,21 @@ class MultiAgentVisualTrainer:
         stats_height = min(80, (self.screen_height - stats_y - 160) // 2)  # Reservar espacio para gráfico y controles
         self.stats_area = pygame.Rect(agents_start_x, stats_y, stats_width, max(60, stats_height))
         
-        # Gráfico de progreso (debajo de estadísticas)
-        graph_y = self.stats_area.bottom + 5
-        graph_height = min(50, self.screen_height - graph_y - 120)  # Reservar espacio para controles
-        self.graph_area = pygame.Rect(agents_start_x, graph_y, stats_width, max(30, graph_height))
+        # Gráfico de progreso (debajo de estadísticas) - más espacio
+        graph_y = self.stats_area.bottom + 10
+        graph_height = min(80, self.screen_height - graph_y - 160)  # Más altura para el gráfico
+        self.graph_area = pygame.Rect(agents_start_x, graph_y, stats_width, max(50, graph_height))
         
-        # Controles en la parte inferior (con más margen desde abajo)
-        controls_y = max(graph_y + graph_height + 15, self.screen_height - 160)  # Más espacio para 3 filas
+        # Controles en la parte inferior (mucho más espacio)
+        controls_height = 170  # Altura generosa para 3 filas
+        controls_y = self.graph_area.bottom + 20  # Más margen desde el gráfico
         controls_width = self.screen_width - 2 * margin
-        controls_height = min(130, self.screen_height - controls_y - margin * 2)  # Altura para 3 filas
-        self.controls_area = pygame.Rect(margin, controls_y, controls_width, max(110, controls_height))
+        self.controls_area = pygame.Rect(margin, controls_y, controls_width, controls_height)
         
-        # Botones de control con espaciado completamente adaptativo
-        row1_y = self.controls_area.y + 25
-        row2_y = self.controls_area.y + max(70, self.controls_area.height - 25)
+        # Botones de control con espaciado muy amplio para 3 filas
+        row1_y = self.controls_area.y + 30
+        row2_y = self.controls_area.y + 80
+        row3_y = self.controls_area.y + 130
         
         # Calcular espaciado dinámico para los botones basado en ancho disponible
         label_space = 80  # Espacio para etiquetas
@@ -455,8 +457,7 @@ class MultiAgentVisualTrainer:
             'rewards': pygame.Rect(button2_start_x + button2_spacing * 4, row2_y, min(70, button2_spacing - 5), 20),
         }
         
-        # 📐 FILA 3: CONTROLES DE DIMENSIONES DEL GRID (nueva fila)
-        row3_y = row2_y + 35
+        # 📐 FILA 3: CONTROLES DE DIMENSIONES DEL GRID (usar row3_y ya definido)
         grid_button_spacing = available_button_width // 4
         grid_button_start_x = label_space + grid_button_spacing // 2
         
@@ -466,6 +467,7 @@ class MultiAgentVisualTrainer:
             'grid_height_down': pygame.Rect(grid_button_start_x + grid_button_spacing, row3_y, 25, 20),
             'grid_height_up': pygame.Rect(grid_button_start_x + grid_button_spacing + 30, row3_y, 25, 20),
             'grid_reset': pygame.Rect(grid_button_start_x + grid_button_spacing * 2, row3_y, min(80, grid_button_spacing - 5), 20),
+            'personality_config': pygame.Rect(grid_button_start_x + grid_button_spacing * 3, row3_y, min(100, grid_button_spacing - 5), 20),
         })
         
         # Actualizar áreas de agentes con posiciones adaptativas - cantidad dinámica
@@ -548,6 +550,8 @@ class MultiAgentVisualTrainer:
                         self.increase_grid_height()
                     elif self.buttons['grid_reset'].collidepoint(event.pos):
                         self.reset_grid_dimensions()
+                    elif self.buttons['personality_config'].collidepoint(event.pos):
+                        self.open_personality_config_window()
                     else:
                         # 🆕 DETECTAR CLICS EN ENTORNOS
                         if hasattr(self, 'close_button_rect') and self.close_button_rect.collidepoint(event.pos):
@@ -1455,8 +1459,9 @@ class MultiAgentVisualTrainer:
             return
             
         if self.grid_width > self.min_grid_width:
+            old_width = self.grid_width
             self.grid_width -= 1
-            print(f"[CONFIG] Ancho del grid reducido a: {self.grid_width}")
+            print(f"[CONFIG] Ancho del grid: {old_width} -> {self.grid_width}")
             self.recreate_environments()
         else:
             print(f"[CONFIG] Ya tienes el ancho mínimo ({self.min_grid_width})")
@@ -1468,8 +1473,9 @@ class MultiAgentVisualTrainer:
             return
             
         if self.grid_width < self.max_grid_width:
+            old_width = self.grid_width
             self.grid_width += 1
-            print(f"[CONFIG] Ancho del grid aumentado a: {self.grid_width}")
+            print(f"[CONFIG] Ancho del grid: {old_width} -> {self.grid_width}")
             self.recreate_environments()
         else:
             print(f"[CONFIG] Ya tienes el ancho máximo ({self.max_grid_width})")
@@ -1481,8 +1487,9 @@ class MultiAgentVisualTrainer:
             return
             
         if self.grid_height > self.min_grid_height:
+            old_height = self.grid_height
             self.grid_height -= 1
-            print(f"[CONFIG] Alto del grid reducido a: {self.grid_height}")
+            print(f"[CONFIG] Alto del grid: {old_height} -> {self.grid_height}")
             self.recreate_environments()
         else:
             print(f"[CONFIG] Ya tienes el alto mínimo ({self.min_grid_height})")
@@ -1494,8 +1501,9 @@ class MultiAgentVisualTrainer:
             return
             
         if self.grid_height < self.max_grid_height:
+            old_height = self.grid_height
             self.grid_height += 1
-            print(f"[CONFIG] Alto del grid aumentado a: {self.grid_height}")
+            print(f"[CONFIG] Alto del grid: {old_height} -> {self.grid_height}")
             self.recreate_environments()
         else:
             print(f"[CONFIG] Ya tienes el alto máximo ({self.max_grid_height})")
@@ -1522,8 +1530,296 @@ class MultiAgentVisualTrainer:
             env = SnakeEnvironment(render=False, max_steps=self.max_steps, reward_config=personality, 
                                  grid_width=self.grid_width, grid_height=self.grid_height)
             self.envs.append(env)
+            print(f"[CONFIG] Entorno {i+1}: {env.grid_width}x{env.grid_height}")
         
-        print(f"[CONFIG] Entornos recreados exitosamente")
+        print(f"[CONFIG] Entornos recreados exitosamente con dimensiones {self.grid_width}x{self.grid_height}")
+    
+    def open_personality_config_window(self):
+        """🎭 Abre una ventana para configurar personalidades manualmente"""
+        if self.training_started:
+            print(f"[CONFIG] No se pueden cambiar las personalidades durante el entrenamiento")
+            return
+        
+        print(f"[CONFIG] Abriendo ventana de configuración de personalidades...")
+        
+        # Crear una nueva ventana
+        config_window = pygame.display.set_mode((800, 600))
+        pygame.display.set_caption("Configuración de Personalidades - Snake RL")
+        
+        # Variables para la ventana de configuración
+        running = True
+        scroll_offset = 0
+        selected_agents = {}  # {agent_idx: personality_idx}
+        open_dropdown = None  # Índice del agente con dropdown abierto
+        
+        # Copiar asignaciones actuales
+        for agent_idx in range(self.num_agents):
+            if agent_idx in self.personality_assignments:
+                selected_agents[agent_idx] = self.personality_assignments[agent_idx]
+            else:
+                selected_agents[agent_idx] = agent_idx % len(self.reward_personalities)
+        
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+                        # Aplicar cambios
+                        self.apply_personality_changes(selected_agents)
+                        running = False
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:  # Click izquierdo
+                        # Detectar clicks en dropdowns de personalidades
+                        mouse_x, mouse_y = event.pos
+                        result = self.handle_personality_click(mouse_x, mouse_y, selected_agents, scroll_offset, open_dropdown)
+                        if result == "close":
+                            running = False
+                        elif isinstance(result, int):
+                            open_dropdown = result  # Abrir dropdown específico
+                        elif result == "close_dropdown":
+                            open_dropdown = None  # Cerrar dropdown
+                elif event.type == pygame.MOUSEWHEEL:
+                    # Si hay un dropdown abierto, hacer scroll en el dropdown
+                    if open_dropdown is not None:
+                        if not hasattr(self, 'dropdown_scroll'):
+                            self.dropdown_scroll = 0
+                        
+                        items_to_show = min(12, len(self.reward_personalities))
+                        max_scroll = max(0, len(self.reward_personalities) - items_to_show)
+                        
+                        self.dropdown_scroll -= event.y
+                        self.dropdown_scroll = max(0, min(self.dropdown_scroll, max_scroll))
+                    else:
+                        # Scroll vertical normal de la ventana
+                        scroll_offset += event.y * 20
+                        scroll_offset = max(0, min(scroll_offset, max(0, (self.num_agents * 60) - 500)))
+            
+            # Dibujar la ventana de configuración
+            self.draw_personality_config_window(config_window, selected_agents, scroll_offset, open_dropdown)
+            pygame.display.flip()
+        
+        # Restaurar ventana principal
+        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
+        pygame.display.set_caption("Snake RL - 9 Agentes Compitiendo - Velocidad Extrema")
+        self.update_layout()  # Recalcular layout
+    
+    def draw_personality_config_window(self, window, selected_agents, scroll_offset, open_dropdown=None):
+        """🎨 Dibuja la ventana de configuración de personalidades"""
+        window.fill(self.WHITE)
+        
+        # Título
+        title = self.font_large.render("Configuración de Personalidades", True, self.BLACK)
+        window.blit(title, (20, 20))
+        
+        # Instrucciones
+        instructions = [
+            "Haz clic en el dropdown para ver todas las personalidades",
+            "ENTER: Aplicar cambios | ESC: Cancelar",
+            "Scroll: Desplazarse por la lista"
+        ]
+        
+        for i, instruction in enumerate(instructions):
+            text = self.font_small.render(instruction, True, self.DARK_GRAY)
+            window.blit(text, (20, 60 + i * 15))
+        
+        # Lista de agentes con sus personalidades
+        start_y = 120 - scroll_offset
+        
+        for agent_idx in range(self.num_agents):
+            y_pos = start_y + agent_idx * 60
+            
+            # Solo dibujar si está visible
+            if -50 < y_pos < 650:
+                # Fondo del agente
+                agent_rect = pygame.Rect(20, y_pos, 760, 50)
+                pygame.draw.rect(window, self.LIGHT_GRAY, agent_rect)
+                pygame.draw.rect(window, self.BLACK, agent_rect, 1)
+                
+                # Nombre del agente
+                agent_text = self.font.render(f"Agente {agent_idx + 1}:", True, self.BLACK)
+                window.blit(agent_text, (30, y_pos + 15))
+                
+                # Personalidad actual
+                personality_idx = selected_agents[agent_idx]
+                personality = self.reward_personalities[personality_idx]
+                
+                # Botón de personalidad (dropdown simulado)
+                personality_rect = pygame.Rect(200, y_pos + 10, 300, 30)
+                pygame.draw.rect(window, self.WHITE, personality_rect)
+                pygame.draw.rect(window, self.BLACK, personality_rect, 1)
+                
+                # Texto de la personalidad
+                personality_text = f"{personality['name']} (Food: {personality['food']}, Death: {personality['death']})"
+                if len(personality_text) > 35:
+                    personality_text = personality_text[:32] + "..."
+                
+                text = self.font_small.render(personality_text, True, self.BLACK)
+                window.blit(text, (205, y_pos + 17))
+                
+                # Flecha dropdown
+                arrow_text = self.font.render("▼", True, self.BLACK)
+                window.blit(arrow_text, (480, y_pos + 15))
+                
+                # Información adicional
+                info_text = f"Step: {personality['step']}, Direct: {personality['direct_movement']}"
+                info = self.font_small.render(info_text, True, self.DARK_GRAY)
+                window.blit(info, (520, y_pos + 17))
+        
+        # Botones de acción
+        apply_rect = pygame.Rect(650, 550, 70, 30)
+        cancel_rect = pygame.Rect(570, 550, 70, 30)
+        
+        pygame.draw.rect(window, self.GREEN, apply_rect)
+        pygame.draw.rect(window, self.BLACK, apply_rect, 1)
+        apply_text = self.font_small.render("APLICAR", True, self.WHITE)
+        window.blit(apply_text, (apply_rect.x + 10, apply_rect.y + 8))
+        
+        pygame.draw.rect(window, self.RED, cancel_rect)
+        pygame.draw.rect(window, self.BLACK, cancel_rect, 1)
+        cancel_text = self.font_small.render("CANCELAR", True, self.WHITE)
+        window.blit(cancel_text, (cancel_rect.x + 5, cancel_rect.y + 8))
+        
+        # Dibujar dropdown AL FINAL para que aparezca por encima de todo
+        if open_dropdown is not None:
+            agent_idx = open_dropdown
+            y_pos = start_y + agent_idx * 60
+            # Solo dibujar si el agente está visible
+            if -50 < y_pos < 650:
+                personality_rect = pygame.Rect(200, y_pos + 10, 300, 30)
+                self.draw_personality_dropdown(window, agent_idx, personality_rect, selected_agents, scroll_offset)
+    
+    def draw_personality_dropdown(self, window, agent_idx, base_rect, selected_agents, scroll_offset):
+        """🎨 Dibuja el dropdown de personalidades abierto"""
+        # Calcular altura para mostrar TODAS las personalidades (máximo 300px)
+        items_to_show = min(12, len(self.reward_personalities))  # Mostrar hasta 12 items visibles
+        dropdown_height = items_to_show * 25
+        dropdown_rect = pygame.Rect(base_rect.x, base_rect.bottom, base_rect.width + 100, dropdown_height)
+        
+        # Sombra del dropdown para mejor visibilidad
+        shadow_rect = pygame.Rect(dropdown_rect.x + 3, dropdown_rect.y + 3, dropdown_rect.width, dropdown_rect.height)
+        pygame.draw.rect(window, self.DARK_GRAY, shadow_rect)
+        
+        # Fondo del dropdown
+        pygame.draw.rect(window, self.WHITE, dropdown_rect)
+        pygame.draw.rect(window, self.BLACK, dropdown_rect, 2)
+        
+        # Scroll interno del dropdown si hay más personalidades de las que caben
+        dropdown_scroll = getattr(self, 'dropdown_scroll', 0)
+        start_index = dropdown_scroll
+        
+        # Lista de personalidades con scroll
+        for i in range(start_index, min(start_index + items_to_show, len(self.reward_personalities))):
+            personality = self.reward_personalities[i]
+            relative_pos = i - start_index
+            item_y = dropdown_rect.y + relative_pos * 25
+            
+            item_rect = pygame.Rect(dropdown_rect.x + 2, item_y, dropdown_rect.width - 4, 25)
+            
+            # Resaltar personalidad seleccionada
+            if i == selected_agents[agent_idx]:
+                pygame.draw.rect(window, self.LIGHT_BLUE, item_rect)
+            
+            # Resaltar al hacer hover (simplificado)
+            pygame.draw.rect(window, self.BLACK, item_rect, 1)
+            
+            # Texto de la personalidad
+            text = f"{personality['name']} (F:{personality['food']}, D:{personality['death']})"
+            if len(text) > 40:
+                text = text[:37] + "..."
+            
+            personality_text = self.font_small.render(text, True, self.BLACK)
+            window.blit(personality_text, (item_rect.x + 5, item_rect.y + 5))
+        
+        # Indicador de scroll si hay más personalidades
+        if len(self.reward_personalities) > items_to_show:
+            # Flecha hacia arriba
+            if dropdown_scroll > 0:
+                up_arrow = self.font_small.render("▲", True, self.BLACK)
+                window.blit(up_arrow, (dropdown_rect.right - 20, dropdown_rect.y + 2))
+            
+            # Flecha hacia abajo  
+            if dropdown_scroll + items_to_show < len(self.reward_personalities):
+                down_arrow = self.font_small.render("▼", True, self.BLACK)
+                window.blit(down_arrow, (dropdown_rect.right - 20, dropdown_rect.bottom - 20))
+    
+    def handle_personality_click(self, mouse_x, mouse_y, selected_agents, scroll_offset, open_dropdown):
+        """🖱️ Maneja los clicks en la ventana de configuración"""
+        start_y = 120 - scroll_offset
+        
+        # Primero verificar si hay un dropdown abierto y se hizo click en él
+        if open_dropdown is not None:
+            agent_idx = open_dropdown
+            y_pos = start_y + agent_idx * 60
+            personality_rect = pygame.Rect(200, y_pos + 10, 300, 30)
+            
+            # Área del dropdown
+            items_to_show = min(12, len(self.reward_personalities))
+            dropdown_height = items_to_show * 25
+            dropdown_rect = pygame.Rect(personality_rect.x, personality_rect.bottom, personality_rect.width + 100, dropdown_height)
+            
+            if dropdown_rect.collidepoint(mouse_x, mouse_y):
+                # Click dentro del dropdown - seleccionar personalidad
+                relative_y = mouse_y - dropdown_rect.y
+                relative_idx = relative_y // 25
+                
+                # Considerar el scroll interno
+                dropdown_scroll = getattr(self, 'dropdown_scroll', 0)
+                personality_idx = dropdown_scroll + relative_idx
+                
+                if 0 <= personality_idx < len(self.reward_personalities) and relative_idx < items_to_show:
+                    selected_agents[agent_idx] = personality_idx
+                    personality = self.reward_personalities[personality_idx]
+                    print(f"[CONFIG] Agente {agent_idx + 1} -> {personality['name']}")
+                    return "close_dropdown"  # Cerrar dropdown después de seleccionar
+            else:
+                # Click fuera del dropdown - cerrarlo
+                return "close_dropdown"
+        
+        # Verificar clicks en los botones de personalidad para abrir dropdown
+        for agent_idx in range(self.num_agents):
+            y_pos = start_y + agent_idx * 60
+            personality_rect = pygame.Rect(200, y_pos + 10, 300, 30)
+            
+            if personality_rect.collidepoint(mouse_x, mouse_y):
+                # Abrir dropdown para este agente y resetear scroll
+                self.dropdown_scroll = 0
+                return agent_idx
+        
+        # Botones de acción
+        apply_rect = pygame.Rect(650, 550, 70, 30)
+        cancel_rect = pygame.Rect(570, 550, 70, 30)
+        
+        if apply_rect.collidepoint(mouse_x, mouse_y):
+            self.apply_personality_changes(selected_agents)
+            return "close"  # Cerrar ventana
+        elif cancel_rect.collidepoint(mouse_x, mouse_y):
+            print("[CONFIG] Configuración de personalidades cancelada")
+            return "close"  # Cerrar ventana
+        
+        return None  # No hacer nada
+    
+    def apply_personality_changes(self, selected_agents):
+        """✅ Aplica los cambios de personalidades"""
+        print(f"[CONFIG] Aplicando cambios de personalidades...")
+        
+        # Actualizar asignaciones
+        self.personality_assignments = selected_agents.copy()
+        
+        # Recrear personalidades de agentes
+        self.agent_personalities = []
+        for agent_idx in range(self.num_agents):
+            personality_idx = selected_agents[agent_idx]
+            personality = self.reward_personalities[personality_idx]
+            self.agent_personalities.append(personality)
+            print(f"[CONFIG] Agente {agent_idx + 1}: {personality['name']} - Food={personality['food']}, Death={personality['death']}")
+        
+        # Recrear entornos con nuevas personalidades
+        self.recreate_environments()
+        
+        print(f"[CONFIG] Personalidades aplicadas exitosamente")
     
     def evolve_agents(self):
         """Sistema de evolución avanzado con múltiples criterios y diversidad genética"""
@@ -2067,7 +2363,7 @@ class MultiAgentVisualTrainer:
     
     def assign_random_personalities(self):
         """🎲 Asigna personalidades aleatorias sin repetición a los agentes"""
-        print(f"\n[PERSONALIDADES] 🧪 MODO EXPERIMENTAL: Asignando personalidad 'Experimental' a TODOS los {self.num_agents} agentes...")
+        print(f"\n[PERSONALIDADES] MODO EXPERIMENTAL: Asignando personalidad 'Experimental' a TODOS los {self.num_agents} agentes...")
         
         # 🧪 EXPERIMENTAL: Buscar la personalidad "Experimental"
         experimental_personality = None
@@ -2088,7 +2384,7 @@ class MultiAgentVisualTrainer:
             self.personality_assignments[agent_idx] = experimental_idx
             print(f"[PERSONALIDADES] Agente {agent_idx+1}: {experimental_personality['name']} (ID: {experimental_idx}) - Food={experimental_personality['food']}, Death={experimental_personality['death']}, Step={experimental_personality['step']}")
         
-        print(f"[PERSONALIDADES] 🧪 TODOS los agentes configurados con personalidad EXPERIMENTAL!")
+        print(f"[PERSONALIDADES] TODOS los agentes configurados con personalidad EXPERIMENTAL!")
         print(f"[PERSONALIDADES] Valores de prueba: Food=+{experimental_personality['food']}, Death={experimental_personality['death']}, Step={experimental_personality['step']}")
     
     def get_agent_personality(self, agent_idx):
@@ -2343,16 +2639,16 @@ class MultiAgentVisualTrainer:
         pygame.draw.rect(self.screen, self.WHITE, self.controls_area)
         pygame.draw.rect(self.screen, self.BLACK, self.controls_area, 1)
         
-        # Etiquetas de las filas (mejor posicionadas)
+        # Etiquetas de las filas (espaciado amplio)
         row1_label = self.font_small.render("CONTROL:", True, self.BLACK)
-        self.screen.blit(row1_label, (self.controls_area.x + 10, self.controls_area.y + 8))
+        self.screen.blit(row1_label, (self.controls_area.x + 10, self.controls_area.y + 10))
         
         row2_label = self.font_small.render("CONFIG:", True, self.BLACK)
-        self.screen.blit(row2_label, (self.controls_area.x + 10, self.controls_area.y + 53))
+        self.screen.blit(row2_label, (self.controls_area.x + 10, self.controls_area.y + 60))
         
         # 📐 Etiqueta para la tercera fila (dimensiones del grid)
         row3_label = self.font_small.render("GRID:", True, self.BLACK)
-        self.screen.blit(row3_label, (self.controls_area.x + 10, self.controls_area.y + 88))
+        self.screen.blit(row3_label, (self.controls_area.x + 10, self.controls_area.y + 110))
         
         # Botón de INICIAR/INICIADO
         if not self.training_started:
@@ -2471,19 +2767,19 @@ class MultiAgentVisualTrainer:
         if 'speed_down' in self.buttons and 'speed_up' in self.buttons:
             speed_label = self.font_small.render("Vel", True, self.BLACK)
             speed_center_x = (self.buttons['speed_down'].x + self.buttons['speed_up'].x + self.buttons['speed_up'].width) // 2
-            label_y = max(self.buttons['speed_down'].y - 15, self.controls_area.y + 53)
+            label_y = max(self.buttons['speed_down'].y - 15, self.controls_area.y + 60)
             self.screen.blit(speed_label, (speed_center_x - speed_label.get_width()//2, label_y))
         
         if 'steps_down' in self.buttons and 'steps_up' in self.buttons:
             steps_label = self.font_small.render("Steps", True, self.BLACK)
             steps_center_x = (self.buttons['steps_down'].x + self.buttons['steps_up'].x + self.buttons['steps_up'].width) // 2
-            label_y = max(self.buttons['steps_down'].y - 15, self.controls_area.y + 53)
+            label_y = max(self.buttons['steps_down'].y - 15, self.controls_area.y + 60)
             self.screen.blit(steps_label, (steps_center_x - steps_label.get_width()//2, label_y))
         
         if 'episodes_down' in self.buttons and 'episodes_up' in self.buttons:
             episodes_label = self.font_small.render("Ep", True, self.BLACK)  # Texto más corto para espacios pequeños
             episodes_center_x = (self.buttons['episodes_down'].x + self.buttons['episodes_up'].x + self.buttons['episodes_up'].width) // 2
-            label_y = max(self.buttons['episodes_down'].y - 15, self.controls_area.y + 53)
+            label_y = max(self.buttons['episodes_down'].y - 15, self.controls_area.y + 60)
             self.screen.blit(episodes_label, (episodes_center_x - episodes_label.get_width()//2, label_y))
         
         if 'agents_down' in self.buttons and 'agents_up' in self.buttons:
@@ -2493,7 +2789,7 @@ class MultiAgentVisualTrainer:
             else:
                 agents_label = self.font_small.render("Agentes", True, self.BLACK)
             agents_center_x = (self.buttons['agents_down'].x + self.buttons['agents_up'].x + self.buttons['agents_up'].width) // 2
-            label_y = max(self.buttons['agents_down'].y - 15, self.controls_area.y + 53)
+            label_y = max(self.buttons['agents_down'].y - 15, self.controls_area.y + 60)
             self.screen.blit(agents_label, (agents_center_x - agents_label.get_width()//2, label_y))
         
         # Información (ajustada para no salir de ventana)
@@ -2503,13 +2799,6 @@ class MultiAgentVisualTrainer:
         # Espaciado ajustado para caber en ventana
         start_x = 600  # Empezar más a la derecha
         spacing = 95   # Espaciado reducido
-        
-        for i, text in enumerate(info_texts):
-            rendered = self.font_small.render(text, True, self.BLACK)
-            x_pos = start_x + i * spacing
-            # Verificar que no se salga de la ventana
-            if x_pos + rendered.get_width() < self.screen_width - 10:
-                self.screen.blit(rendered, (x_pos, self.controls_area.y + 12))
         
         # 📐 CONTROLES DE DIMENSIONES DEL GRID (FILA 3)
         if 'grid_width_down' in self.buttons:
@@ -2531,7 +2820,7 @@ class MultiAgentVisualTrainer:
             # Etiqueta de ancho
             width_label = self.font_small.render(f"Ancho: {self.grid_width}", True, self.BLACK)
             width_center_x = (self.buttons['grid_width_down'].x + self.buttons['grid_width_up'].x + self.buttons['grid_width_up'].width) // 2
-            label_y = max(self.buttons['grid_width_down'].y - 15, self.controls_area.y + 88)
+            label_y = max(self.buttons['grid_width_down'].y - 15, self.controls_area.y + 110)
             self.screen.blit(width_label, (width_center_x - width_label.get_width()//2, label_y))
         
         if 'grid_height_down' in self.buttons:
@@ -2553,7 +2842,7 @@ class MultiAgentVisualTrainer:
             # Etiqueta de alto
             height_label = self.font_small.render(f"Alto: {self.grid_height}", True, self.BLACK)
             height_center_x = (self.buttons['grid_height_down'].x + self.buttons['grid_height_up'].x + self.buttons['grid_height_up'].width) // 2
-            label_y = max(self.buttons['grid_height_down'].y - 15, self.controls_area.y + 88)
+            label_y = max(self.buttons['grid_height_down'].y - 15, self.controls_area.y + 110)
             self.screen.blit(height_label, (height_center_x - height_label.get_width()//2, label_y))
         
         if 'grid_reset' in self.buttons:
@@ -2566,6 +2855,16 @@ class MultiAgentVisualTrainer:
             reset_rect = reset_text.get_rect(center=self.buttons['grid_reset'].center)
             self.screen.blit(reset_text, reset_rect)
         
+        if 'personality_config' in self.buttons:
+            # Botón de configuración de personalidades
+            config_color = self.GRAY if self.training_started else self.PURPLE
+            
+            pygame.draw.rect(self.screen, config_color, self.buttons['personality_config'])
+            pygame.draw.rect(self.screen, self.BLACK, self.buttons['personality_config'], 1)
+            config_text = self.font_small.render("PERSONALIDADES", True, self.WHITE)
+            config_rect = config_text.get_rect(center=self.buttons['personality_config'].center)
+            self.screen.blit(config_text, config_rect)
+        
         # Actualizar información para incluir dimensiones del grid
         info_texts = [
             f"Vel: {current_speed}",
@@ -2575,6 +2874,14 @@ class MultiAgentVisualTrainer:
             f"Grid: {self.grid_width}x{self.grid_height}",
             f"Red: {current_personality['name'][:8]}"  # Truncar nombre largo
         ]
+        
+        # Dibujar información
+        for i, text in enumerate(info_texts):
+            rendered = self.font_small.render(text, True, self.BLACK)
+            x_pos = start_x + i * spacing
+            # Verificar que no se salga de la ventana
+            if x_pos + rendered.get_width() < self.screen_width - 10:
+                self.screen.blit(rendered, (x_pos, self.controls_area.y + 12))
     
     def draw_game(self, agent_idx, state, info):
         """Dibuja un juego individual"""
@@ -2606,9 +2913,9 @@ class MultiAgentVisualTrainer:
         
         # Calcular tamaño de celda basado en el área real y el grid del entorno
         env = self.envs[agent_idx]
-        # El entorno usa un grid de 25x20 según snake_env.py
-        GRID_WIDTH = 25
-        GRID_HEIGHT = 20
+        # Usar las dimensiones reales del entorno
+        GRID_WIDTH = env.grid_width
+        GRID_HEIGHT = env.grid_height
         grid_size_x = area.width // GRID_WIDTH
         grid_size_y = area.height // GRID_HEIGHT
         grid_size = min(grid_size_x, grid_size_y)  # Usar el menor para mantener proporción
