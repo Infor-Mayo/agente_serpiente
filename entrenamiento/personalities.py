@@ -292,16 +292,16 @@ SNAKE_PERSONALITIES = [
     },
     {
         'name': 'Experimental',
-        'food': 10.0,
-        'death': -10.0,
-        'self_collision': -15.0,
-        'step': -0.01,
-        'approach': 0.0,
-        'retreat': -0.0,
-        'direct_movement': 0.0,
-        'efficiency_bonus': 0.0,
-        'wasted_movement': -0.0,
-        'description': 'Personalidad experimental con valores de prueba específicos.'
+        'food': 50.0,
+        'death': -90.0,
+        'self_collision': -100.0,
+        'step': -0.05,
+        'approach': 3.0,
+        'retreat': -1.0,
+        'direct_movement': 4.0,
+        'efficiency_bonus': 6.0,
+        'wasted_movement': -0.5,
+        'description': 'Personalidad experimental optimizada para aprendizaje efectivo.'
     }
 ]
 
