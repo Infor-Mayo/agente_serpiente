@@ -74,12 +74,16 @@ class MultiAgentVisualTrainer:
         self.max_agents = 12  # Máximo permitido
         
         # 📐 DIMENSIONES CONFIGURABLES DEL ENTORNO
-        self.grid_width = 25   # Ancho del tablero (mínimo 5, máximo 50)
-        self.grid_height = 20  # Alto del tablero (mínimo 5, máximo 40)
+        self.grid_width = 25   # Ancho del tablero (mínimo 5, máximo 100)
+        self.grid_height = 20  # Alto del tablero (mínimo 5, máximo 80)
         self.min_grid_width = 5
-        self.max_grid_width = 50
+        self.max_grid_width = 100  # Aumentado de 50 a 100
         self.min_grid_height = 5
-        self.max_grid_height = 40
+        self.max_grid_height = 80   # Aumentado de 40 a 80
+        
+        print(f"[CONFIG] Límites de entorno actualizados:")
+        print(f"[CONFIG] Ancho: {self.min_grid_width}-{self.max_grid_width} (actual: {self.grid_width})")
+        print(f"[CONFIG] Alto: {self.min_grid_height}-{self.max_grid_height} (actual: {self.grid_height})")
         
         # 🚀 CONFIGURACIÓN MULTI-NÚCLEO PARA FPS REALES
         self.cpu_cores = mp.cpu_count()
@@ -497,7 +501,11 @@ class MultiAgentVisualTrainer:
             
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
+                    old_paused = self.paused
                     self.paused = not self.paused
+                    print(f"[DEBUG] SPACE - Estado de pausa cambiado: {old_paused} -> {self.paused}")
+                    print(f"[DEBUG] SPACE - training_started: {self.training_started}, paused: {self.paused}")
+                    print(f"[DEBUG] SPACE - Controles deberían estar: {'DESBLOQUEADOS' if not (self.training_started and not self.paused) else 'BLOQUEADOS'}")
                 elif event.key == pygame.K_UP:
                     self.increase_speed()
                 elif event.key == pygame.K_DOWN:
@@ -513,7 +521,11 @@ class MultiAgentVisualTrainer:
                         self.log_info("USUARIO_ACCIÓN - Botón INICIAR presionado")
                         self.log_info(f"CONFIGURACIÓN_FINAL_CONFIRMADA - Episodios: {self.max_episodes}, Agentes: {self.num_agents}")
                     elif self.buttons['pause'].collidepoint(event.pos):
+                        old_paused = self.paused
                         self.paused = not self.paused
+                        print(f"[DEBUG] Estado de pausa cambiado: {old_paused} -> {self.paused}")
+                        print(f"[DEBUG] training_started: {self.training_started}, paused: {self.paused}")
+                        print(f"[DEBUG] Controles deberían estar: {'DESBLOQUEADOS' if not (self.training_started and not self.paused) else 'BLOQUEADOS'}")
                     elif self.buttons['speed_down'].collidepoint(event.pos):
                         self.decrease_speed()
                     elif self.buttons['speed_up'].collidepoint(event.pos):
@@ -1454,8 +1466,9 @@ class MultiAgentVisualTrainer:
     
     def decrease_grid_width(self):
         """📐 Reduce el ancho del grid"""
-        if self.training_started:
-            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+        print(f"[DEBUG] decrease_grid_width llamado - training_started: {self.training_started}, paused: {self.paused}")
+        if self.training_started and not self.paused:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
         if self.grid_width > self.min_grid_width:
@@ -1468,8 +1481,8 @@ class MultiAgentVisualTrainer:
     
     def increase_grid_width(self):
         """📐 Aumenta el ancho del grid"""
-        if self.training_started:
-            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+        if self.training_started and not self.paused:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
         if self.grid_width < self.max_grid_width:
@@ -1482,8 +1495,8 @@ class MultiAgentVisualTrainer:
     
     def decrease_grid_height(self):
         """📐 Reduce el alto del grid"""
-        if self.training_started:
-            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+        if self.training_started and not self.paused:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
         if self.grid_height > self.min_grid_height:
@@ -1496,8 +1509,8 @@ class MultiAgentVisualTrainer:
     
     def increase_grid_height(self):
         """📐 Aumenta el alto del grid"""
-        if self.training_started:
-            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+        if self.training_started and not self.paused:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
         if self.grid_height < self.max_grid_height:
@@ -1510,8 +1523,8 @@ class MultiAgentVisualTrainer:
     
     def reset_grid_dimensions(self):
         """📐 Resetea las dimensiones del grid a valores por defecto"""
-        if self.training_started:
-            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento")
+        if self.training_started and not self.paused:
+            print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
         self.grid_width = 25
@@ -2802,8 +2815,13 @@ class MultiAgentVisualTrainer:
         
         # 📐 CONTROLES DE DIMENSIONES DEL GRID (FILA 3)
         if 'grid_width_down' in self.buttons:
-            # Botones de ancho del grid
-            grid_color = self.GRAY if self.training_started else self.ORANGE
+            # Botones de ancho del grid - Disponibles durante la pausa
+            grid_available = not (self.training_started and not self.paused)
+            
+            if grid_available:
+                grid_color = self.ORANGE  # Disponible
+            else:
+                grid_color = self.GRAY  # Bloqueado
             
             pygame.draw.rect(self.screen, grid_color, self.buttons['grid_width_down'])
             pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_width_down'], 1)
@@ -2822,10 +2840,22 @@ class MultiAgentVisualTrainer:
             width_center_x = (self.buttons['grid_width_down'].x + self.buttons['grid_width_up'].x + self.buttons['grid_width_up'].width) // 2
             label_y = max(self.buttons['grid_width_down'].y - 15, self.controls_area.y + 110)
             self.screen.blit(width_label, (width_center_x - width_label.get_width()//2, label_y))
+            
+            # Mensaje informativo sobre disponibilidad durante pausa
+            if self.training_started and not self.paused:
+                pause_hint = self.font_small.render("(Pausar para modificar)", True, self.DARK_GRAY)
+                hint_x = width_center_x - pause_hint.get_width()//2
+                hint_y = label_y + 12
+                self.screen.blit(pause_hint, (hint_x, hint_y))
         
         if 'grid_height_down' in self.buttons:
-            # Botones de alto del grid
-            grid_color = self.GRAY if self.training_started else self.ORANGE
+            # Botones de alto del grid - Disponibles durante la pausa
+            grid_available = not (self.training_started and not self.paused)
+            
+            if grid_available:
+                grid_color = self.ORANGE  # Disponible
+            else:
+                grid_color = self.GRAY  # Bloqueado
             
             pygame.draw.rect(self.screen, grid_color, self.buttons['grid_height_down'])
             pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_height_down'], 1)
@@ -2846,8 +2876,13 @@ class MultiAgentVisualTrainer:
             self.screen.blit(height_label, (height_center_x - height_label.get_width()//2, label_y))
         
         if 'grid_reset' in self.buttons:
-            # Botón de reset de dimensiones
-            reset_color = self.GRAY if self.training_started else self.RED
+            # Botón de reset de dimensiones - Disponible durante la pausa
+            grid_available = not (self.training_started and not self.paused)
+            
+            if grid_available:
+                reset_color = self.RED  # Disponible
+            else:
+                reset_color = self.GRAY  # Bloqueado
             
             pygame.draw.rect(self.screen, reset_color, self.buttons['grid_reset'])
             pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_reset'], 1)

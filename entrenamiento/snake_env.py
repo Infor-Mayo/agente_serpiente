@@ -8,6 +8,10 @@ DEFAULT_GRID_WIDTH = 25
 DEFAULT_GRID_HEIGHT = 20
 CELL_SIZE = 25  # Tamaño de cada celda en píxeles (más grande)
 
+# Compatibilidad con el juego principal
+GRID_WIDTH = DEFAULT_GRID_WIDTH
+GRID_HEIGHT = DEFAULT_GRID_HEIGHT
+
 # Inicializar pygame
 pygame.init()
 BLACK = (0, 0, 0)
