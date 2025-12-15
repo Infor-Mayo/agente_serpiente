@@ -503,9 +503,11 @@ class MultiAgentVisualTrainer:
                 if event.key == pygame.K_SPACE:
                     old_paused = self.paused
                     self.paused = not self.paused
+                    # 🔧 DEBUG CORREGIDO: Nueva lógica de botones
+                    grid_should_be_available = not self.training_started or self.paused
                     print(f"[DEBUG] SPACE - Estado de pausa cambiado: {old_paused} -> {self.paused}")
                     print(f"[DEBUG] SPACE - training_started: {self.training_started}, paused: {self.paused}")
-                    print(f"[DEBUG] SPACE - Controles deberían estar: {'DESBLOQUEADOS' if not (self.training_started and not self.paused) else 'BLOQUEADOS'}")
+                    print(f"[DEBUG] SPACE - Botones de grid deberían estar: {'ACTIVADOS (naranja)' if grid_should_be_available else 'DESACTIVADOS (gris)'}")
                 elif event.key == pygame.K_UP:
                     self.increase_speed()
                 elif event.key == pygame.K_DOWN:
@@ -523,9 +525,11 @@ class MultiAgentVisualTrainer:
                     elif self.buttons['pause'].collidepoint(event.pos):
                         old_paused = self.paused
                         self.paused = not self.paused
+                        # 🔧 DEBUG CORREGIDO: Nueva lógica de botones
+                        grid_should_be_available = not self.training_started or self.paused
                         print(f"[DEBUG] Estado de pausa cambiado: {old_paused} -> {self.paused}")
                         print(f"[DEBUG] training_started: {self.training_started}, paused: {self.paused}")
-                        print(f"[DEBUG] Controles deberían estar: {'DESBLOQUEADOS' if not (self.training_started and not self.paused) else 'BLOQUEADOS'}")
+                        print(f"[DEBUG] Botones de grid deberían estar: {'ACTIVADOS (naranja)' if grid_should_be_available else 'DESACTIVADOS (gris)'}")
                     elif self.buttons['speed_down'].collidepoint(event.pos):
                         self.decrease_speed()
                     elif self.buttons['speed_up'].collidepoint(event.pos):
@@ -930,20 +934,29 @@ class MultiAgentVisualTrainer:
             print(f"\n[LOAD] Sesión actual: {self.session_id}")
             print("[LOAD] Se mostrará solo la sesión actual. Para cargar otra sesión, especifica el ID.")
         
-        # Agrupar por episodio y timestamp (mismo checkpoint)
-        episodes = {}
+        # 🔧 AGRUPAR POR SESIÓN Y EPISODIO (mejorado)
+        session_episodes = {}
         for model in model_info:
-            key = f"ep{model['episode']}_{model['timestamp']}"
-            if key not in episodes:
-                episodes[key] = {
-                    'episode': model['episode'],
-                    'timestamp': model['timestamp'],
-                    'agents': []
+            session_id = model.get('session_id', model.get('timestamp', 'unknown'))
+            episode = model['episode']
+            timestamp = model['timestamp']
+            
+            # Clave única por sesión y episodio
+            key = f"{session_id}_ep{episode}_{timestamp}"
+            
+            if key not in session_episodes:
+                session_episodes[key] = {
+                    'session_id': session_id,
+                    'episode': episode,
+                    'timestamp': timestamp,
+                    'agents': [],
+                    'group_key': key  # Para identificar el grupo al eliminar
                 }
-            episodes[key]['agents'].append(model)
+            session_episodes[key]['agents'].append(model)
         
-        # Ordenar por episodio (más recientes primero)
-        episode_list = sorted(episodes.values(), key=lambda x: x['episode'], reverse=True)
+        # Ordenar por sesión y episodio (más recientes primero)
+        episode_list = sorted(session_episodes.values(), 
+                            key=lambda x: (x['session_id'], x['episode']), reverse=True)
         
         # Mostrar interfaz gráfica de selección
         self.show_checkpoint_selection_ui(episode_list)
@@ -1081,8 +1094,21 @@ class MultiAgentVisualTrainer:
                             item_index = relative_y // item_height + scroll_offset
                             
                             if 0 <= item_index < len(episode_list):
-                                selected_checkpoint = episode_list[item_index]
-                                running = False
+                                # 🗑️ VERIFICAR SI ES CLICK EN BOTÓN DE ELIMINAR
+                                item_y = list_area.y + (item_index - scroll_offset) * item_height
+                                delete_button_rect = pygame.Rect(list_area.right - 80, item_y + 15, 60, 30)
+                                
+                                if delete_button_rect.collidepoint(mouse_x, mouse_y):
+                                    # Eliminar grupo de modelos
+                                    if self.confirm_delete_group(episode_list[item_index]):
+                                        self.delete_model_group(episode_list[item_index])
+                                        # Actualizar lista después de eliminar
+                                        self.load_checkpoint_dialog()
+                                        return
+                                else:
+                                    # Click normal - cargar checkpoint
+                                    selected_checkpoint = episode_list[item_index]
+                                    running = False
                 
                 elif event.type == pygame.MOUSEWHEEL:
                     # Scroll con rueda del mouse
@@ -1147,10 +1173,11 @@ class MultiAgentVisualTrainer:
             
             pygame.draw.rect(self.screen, (200, 200, 200), item_rect, 1)
             
-            # Información del checkpoint
+            # 📊 INFORMACIÓN DEL CHECKPOINT (mejorada con sesión)
             agents_count = len(episode_data['agents'])
             best_score = max([agent['score'] for agent in episode_data['agents']])
             avg_score = sum([agent['score'] for agent in episode_data['agents']]) / agents_count
+            session_id = episode_data.get('session_id', 'unknown')
             
             # Formatear timestamp
             timestamp_str = episode_data['timestamp']
@@ -1162,17 +1189,32 @@ class MultiAgentVisualTrainer:
             except:
                 date_str = timestamp_str
             
-            # Textos del item
+            # 🎨 TEXTOS DEL ITEM (con información de sesión)
             episode_text = self.font.render(f"Episodio {episode_data['episode']}", True, self.BLACK)
+            session_text = self.font_small.render(f"Sesión: {session_id[:8]}...", True, (0, 0, 150))  # Azul para sesión
             agents_text = self.font_small.render(f"{agents_count} agentes", True, (100, 100, 100))
             score_text = self.font_small.render(f"Mejor: {best_score} | Promedio: {avg_score:.1f}", True, (0, 100, 0))
             date_text = self.font_small.render(date_str, True, (100, 100, 100))
             
-            # Posicionar textos
+            # 🗑️ BOTÓN DE ELIMINAR
+            delete_button_rect = pygame.Rect(item_rect.right - 70, item_rect.y + 15, 60, 30)
+            mouse_x, mouse_y = pygame.mouse.get_pos()
+            delete_hover = delete_button_rect.collidepoint(mouse_x, mouse_y)
+            
+            delete_color = (220, 50, 50) if delete_hover else (180, 50, 50)
+            pygame.draw.rect(self.screen, delete_color, delete_button_rect)
+            pygame.draw.rect(self.screen, self.BLACK, delete_button_rect, 1)
+            
+            delete_text = self.font_small.render("ELIMINAR", True, self.WHITE)
+            delete_text_rect = delete_text.get_rect(center=delete_button_rect.center)
+            self.screen.blit(delete_text, delete_text_rect)
+            
+            # 📍 POSICIONAR TEXTOS (ajustado para el botón de eliminar)
             self.screen.blit(episode_text, (item_rect.x + 10, item_rect.y + 5))
-            self.screen.blit(agents_text, (item_rect.x + 200, item_rect.y + 5))
+            self.screen.blit(session_text, (item_rect.x + 180, item_rect.y + 5))
+            self.screen.blit(agents_text, (item_rect.x + 320, item_rect.y + 5))
             self.screen.blit(score_text, (item_rect.x + 10, item_rect.y + 25))
-            self.screen.blit(date_text, (item_rect.x + 400, item_rect.y + 25))
+            self.screen.blit(date_text, (item_rect.x + 10, item_rect.y + 40))
         
         # Indicador de scroll si es necesario
         if len(episode_list) > max_visible_items:
@@ -1226,6 +1268,127 @@ class MultiAgentVisualTrainer:
             self.clock.tick(min(60, current_speed))
         
         return 0
+    
+    def confirm_delete_group(self, episode_data):
+        """🗑️ Confirma la eliminación de un grupo de modelos"""
+        import pygame
+        
+        # Información del grupo
+        agents_count = len(episode_data['agents'])
+        episode = episode_data['episode']
+        session_id = episode_data.get('session_id', 'unknown')[:8]
+        
+        # Configuración del diálogo de confirmación
+        dialog_width = 500
+        dialog_height = 200
+        dialog_x = (self.screen_width - dialog_width) // 2
+        dialog_y = (self.screen_height - dialog_height) // 2
+        dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, dialog_height)
+        
+        # Botones
+        confirm_button = pygame.Rect(dialog_x + 100, dialog_y + 140, 100, 40)
+        cancel_button = pygame.Rect(dialog_x + 300, dialog_y + 140, 100, 40)
+        
+        running = True
+        result = False
+        
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        return False
+                    elif event.key == pygame.K_RETURN:
+                        return True
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:  # Click izquierdo
+                        mouse_x, mouse_y = event.pos
+                        if confirm_button.collidepoint(mouse_x, mouse_y):
+                            return True
+                        elif cancel_button.collidepoint(mouse_x, mouse_y):
+                            return False
+            
+            # Renderizar diálogo de confirmación
+            # Fondo semi-transparente
+            overlay = pygame.Surface((self.screen_width, self.screen_height))
+            overlay.set_alpha(128)
+            overlay.fill((0, 0, 0))
+            self.screen.blit(overlay, (0, 0))
+            
+            # Fondo del diálogo
+            pygame.draw.rect(self.screen, self.WHITE, dialog_rect)
+            pygame.draw.rect(self.screen, self.BLACK, dialog_rect, 3)
+            
+            # Título
+            title_text = self.font_large.render("⚠️ CONFIRMAR ELIMINACIÓN", True, (200, 0, 0))
+            title_rect = title_text.get_rect(center=(dialog_rect.centerx, dialog_rect.y + 30))
+            self.screen.blit(title_text, title_rect)
+            
+            # Información del grupo
+            info_lines = [
+                f"Episodio: {episode}",
+                f"Sesión: {session_id}...",
+                f"Agentes: {agents_count} modelos",
+                "",
+                "Esta acción NO se puede deshacer"
+            ]
+            
+            for i, line in enumerate(info_lines):
+                color = (200, 0, 0) if "NO se puede" in line else self.BLACK
+                text = self.font_small.render(line, True, color)
+                text_rect = text.get_rect(center=(dialog_rect.centerx, dialog_rect.y + 70 + i * 15))
+                self.screen.blit(text, text_rect)
+            
+            # Botones
+            # Confirmar
+            pygame.draw.rect(self.screen, (200, 50, 50), confirm_button)
+            pygame.draw.rect(self.screen, self.BLACK, confirm_button, 2)
+            confirm_text = self.font.render("ELIMINAR", True, self.WHITE)
+            confirm_text_rect = confirm_text.get_rect(center=confirm_button.center)
+            self.screen.blit(confirm_text, confirm_text_rect)
+            
+            # Cancelar
+            pygame.draw.rect(self.screen, (100, 100, 100), cancel_button)
+            pygame.draw.rect(self.screen, self.BLACK, cancel_button, 2)
+            cancel_text = self.font.render("CANCELAR", True, self.WHITE)
+            cancel_text_rect = cancel_text.get_rect(center=cancel_button.center)
+            self.screen.blit(cancel_text, cancel_text_rect)
+            
+            pygame.display.flip()
+            self.clock.tick(60)
+        
+        return result
+    
+    def delete_model_group(self, episode_data):
+        """🗑️ Elimina un grupo completo de modelos"""
+        import os
+        
+        deleted_count = 0
+        failed_count = 0
+        
+        print(f"\n[DELETE] Eliminando grupo: Episodio {episode_data['episode']}, Sesión {episode_data.get('session_id', 'unknown')[:8]}...")
+        
+        for agent_data in episode_data['agents']:
+            try:
+                file_path = agent_data['file']
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    deleted_count += 1
+                    print(f"[DELETE] ✓ Eliminado: {os.path.basename(file_path)}")
+                else:
+                    print(f"[DELETE] ⚠️ No encontrado: {os.path.basename(file_path)}")
+                    failed_count += 1
+            except Exception as e:
+                print(f"[DELETE] ❌ Error eliminando {agent_data['file']}: {e}")
+                failed_count += 1
+        
+        print(f"[DELETE] Resumen: {deleted_count} eliminados, {failed_count} errores")
+        
+        if deleted_count > 0:
+            print(f"[DELETE] ✅ Grupo eliminado exitosamente")
+        else:
+            print(f"[DELETE] ❌ No se pudo eliminar el grupo")
     
     def load_checkpoint_agents(self, episode_data):
         """Carga agentes de checkpoint con ajuste inteligente de cantidad"""
@@ -1467,7 +1630,12 @@ class MultiAgentVisualTrainer:
     def decrease_grid_width(self):
         """📐 Reduce el ancho del grid"""
         print(f"[DEBUG] decrease_grid_width llamado - training_started: {self.training_started}, paused: {self.paused}")
-        if self.training_started and not self.paused:
+        
+        # 🔧 NUEVA LÓGICA: Solo bloquear si está entrenando Y NO pausado
+        should_block = self.training_started and not self.paused
+        print(f"[DEBUG] should_block = {self.training_started} and not {self.paused} = {should_block}")
+        
+        if should_block:
             print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
@@ -1481,7 +1649,13 @@ class MultiAgentVisualTrainer:
     
     def increase_grid_width(self):
         """📐 Aumenta el ancho del grid"""
-        if self.training_started and not self.paused:
+        print(f"[DEBUG] increase_grid_width llamado - training_started: {self.training_started}, paused: {self.paused}")
+        
+        # 🔧 NUEVA LÓGICA: Solo bloquear si está entrenando Y NO pausado
+        should_block = self.training_started and not self.paused
+        print(f"[DEBUG] should_block = {self.training_started} and not {self.paused} = {should_block}")
+        
+        if should_block:
             print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
@@ -1495,7 +1669,13 @@ class MultiAgentVisualTrainer:
     
     def decrease_grid_height(self):
         """📐 Reduce el alto del grid"""
-        if self.training_started and not self.paused:
+        print(f"[DEBUG] decrease_grid_height llamado - training_started: {self.training_started}, paused: {self.paused}")
+        
+        # 🔧 NUEVA LÓGICA: Solo bloquear si está entrenando Y NO pausado
+        should_block = self.training_started and not self.paused
+        print(f"[DEBUG] should_block = {self.training_started} and not {self.paused} = {should_block}")
+        
+        if should_block:
             print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
@@ -1509,7 +1689,13 @@ class MultiAgentVisualTrainer:
     
     def increase_grid_height(self):
         """📐 Aumenta el alto del grid"""
-        if self.training_started and not self.paused:
+        print(f"[DEBUG] increase_grid_height llamado - training_started: {self.training_started}, paused: {self.paused}")
+        
+        # 🔧 NUEVA LÓGICA: Solo bloquear si está entrenando Y NO pausado
+        should_block = self.training_started and not self.paused
+        print(f"[DEBUG] should_block = {self.training_started} and not {self.paused} = {should_block}")
+        
+        if should_block:
             print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
@@ -1523,7 +1709,13 @@ class MultiAgentVisualTrainer:
     
     def reset_grid_dimensions(self):
         """📐 Resetea las dimensiones del grid a valores por defecto"""
-        if self.training_started and not self.paused:
+        print(f"[DEBUG] reset_grid_dimensions llamado - training_started: {self.training_started}, paused: {self.paused}")
+        
+        # 🔧 NUEVA LÓGICA: Solo bloquear si está entrenando Y NO pausado
+        should_block = self.training_started and not self.paused
+        print(f"[DEBUG] should_block = {self.training_started} and not {self.paused} = {should_block}")
+        
+        if should_block:
             print(f"[CONFIG] No se pueden cambiar las dimensiones durante el entrenamiento (pausar primero)")
             return
             
@@ -1594,6 +1786,9 @@ class MultiAgentVisualTrainer:
                             open_dropdown = result  # Abrir dropdown específico
                         elif result == "close_dropdown":
                             open_dropdown = None  # Cerrar dropdown
+                        elif result == "random_assigned":
+                            # 🎲 NUEVO: Personalidades aleatorias asignadas, cerrar cualquier dropdown abierto
+                            open_dropdown = None
                 elif event.type == pygame.MOUSEWHEEL:
                     # Si hay un dropdown abierto, hacer scroll en el dropdown
                     if open_dropdown is not None:
@@ -1630,8 +1825,8 @@ class MultiAgentVisualTrainer:
         # Instrucciones
         instructions = [
             "Haz clic en el dropdown para ver todas las personalidades",
-            "ENTER: Aplicar cambios | ESC: Cancelar",
-            "Scroll: Desplazarse por la lista"
+            "ALEATORIO: Asigna personalidades al azar | APLICAR: Guardar cambios | CANCELAR: Descartar",
+            "ENTER: Aplicar cambios | ESC: Cancelar | Scroll: Desplazarse por la lista"
         ]
         
         for i, instruction in enumerate(instructions):
@@ -1681,19 +1876,34 @@ class MultiAgentVisualTrainer:
                 info = self.font_small.render(info_text, True, self.DARK_GRAY)
                 window.blit(info, (520, y_pos + 17))
         
-        # Botones de acción
-        apply_rect = pygame.Rect(650, 550, 70, 30)
-        cancel_rect = pygame.Rect(570, 550, 70, 30)
+        # 🎛️ BOTONES REORGANIZADOS - Esquina superior derecha
+        # Fila superior: CANCELAR y APLICAR
+        cancel_rect = pygame.Rect(640, 50, 70, 25)
+        apply_rect = pygame.Rect(720, 50, 70, 25)
         
-        pygame.draw.rect(window, self.GREEN, apply_rect)
-        pygame.draw.rect(window, self.BLACK, apply_rect, 1)
-        apply_text = self.font_small.render("APLICAR", True, self.WHITE)
-        window.blit(apply_text, (apply_rect.x + 10, apply_rect.y + 8))
+        # Fila inferior: ALEATORIO (centrado debajo de los otros dos)
+        random_rect = pygame.Rect(655, 85, 100, 25)  # 🎲 Centrado entre los botones superiores
         
+        # Dibujar CANCELAR
         pygame.draw.rect(window, self.RED, cancel_rect)
         pygame.draw.rect(window, self.BLACK, cancel_rect, 1)
         cancel_text = self.font_small.render("CANCELAR", True, self.WHITE)
-        window.blit(cancel_text, (cancel_rect.x + 5, cancel_rect.y + 8))
+        cancel_text_rect = cancel_text.get_rect(center=cancel_rect.center)
+        window.blit(cancel_text, cancel_text_rect)
+        
+        # Dibujar APLICAR
+        pygame.draw.rect(window, self.GREEN, apply_rect)
+        pygame.draw.rect(window, self.BLACK, apply_rect, 1)
+        apply_text = self.font_small.render("APLICAR", True, self.WHITE)
+        apply_text_rect = apply_text.get_rect(center=apply_rect.center)
+        window.blit(apply_text, apply_text_rect)
+        
+        # 🎲 Dibujar ALEATORIO
+        pygame.draw.rect(window, self.ORANGE, random_rect)
+        pygame.draw.rect(window, self.BLACK, random_rect, 1)
+        random_text = self.font_small.render("ALEATORIO", True, self.WHITE)
+        random_text_rect = random_text.get_rect(center=random_rect.center)
+        window.blit(random_text, random_text_rect)
         
         # Dibujar dropdown AL FINAL para que aparezca por encima de todo
         if open_dropdown is not None:
@@ -1705,11 +1915,37 @@ class MultiAgentVisualTrainer:
                 self.draw_personality_dropdown(window, agent_idx, personality_rect, selected_agents, scroll_offset)
     
     def draw_personality_dropdown(self, window, agent_idx, base_rect, selected_agents, scroll_offset):
-        """🎨 Dibuja el dropdown de personalidades abierto"""
+        """🎨 Dibuja el dropdown de personalidades abierto - CON DETECCIÓN DE ESPACIO"""
         # Calcular altura para mostrar TODAS las personalidades (máximo 300px)
         items_to_show = min(12, len(self.reward_personalities))  # Mostrar hasta 12 items visibles
         dropdown_height = items_to_show * 25
-        dropdown_rect = pygame.Rect(base_rect.x, base_rect.bottom, base_rect.width + 100, dropdown_height)
+        
+        # 🔧 DETECCIÓN INTELIGENTE DE ESPACIO DISPONIBLE
+        window_height = 600  # Altura de la ventana de configuración
+        space_below = window_height - base_rect.bottom
+        space_above = base_rect.top
+        
+        # Decidir si dibujar hacia arriba o hacia abajo
+        if space_below >= dropdown_height:
+            # Hay espacio suficiente hacia abajo - comportamiento normal
+            dropdown_rect = pygame.Rect(base_rect.x, base_rect.bottom, base_rect.width + 100, dropdown_height)
+        elif space_above >= dropdown_height:
+            # No hay espacio abajo pero sí arriba - dibujar hacia arriba
+            dropdown_rect = pygame.Rect(base_rect.x, base_rect.top - dropdown_height, base_rect.width + 100, dropdown_height)
+        else:
+            # Poco espacio en ambas direcciones - usar el lado con más espacio
+            if space_below > space_above:
+                # Usar espacio disponible hacia abajo (reducido)
+                available_height = max(100, space_below - 20)  # Mínimo 100px, dejar 20px de margen
+                items_to_show = min(items_to_show, available_height // 25)
+                dropdown_height = items_to_show * 25
+                dropdown_rect = pygame.Rect(base_rect.x, base_rect.bottom, base_rect.width + 100, dropdown_height)
+            else:
+                # Usar espacio disponible hacia arriba (reducido)
+                available_height = max(100, space_above - 20)  # Mínimo 100px, dejar 20px de margen
+                items_to_show = min(items_to_show, available_height // 25)
+                dropdown_height = items_to_show * 25
+                dropdown_rect = pygame.Rect(base_rect.x, base_rect.top - dropdown_height, base_rect.width + 100, dropdown_height)
         
         # Sombra del dropdown para mejor visibilidad
         shadow_rect = pygame.Rect(dropdown_rect.x + 3, dropdown_rect.y + 3, dropdown_rect.width, dropdown_rect.height)
@@ -1768,10 +2004,36 @@ class MultiAgentVisualTrainer:
             y_pos = start_y + agent_idx * 60
             personality_rect = pygame.Rect(200, y_pos + 10, 300, 30)
             
-            # Área del dropdown
+            # 🔧 ÁREA DEL DROPDOWN CON DETECCIÓN DE ESPACIO (igual que en draw_personality_dropdown)
             items_to_show = min(12, len(self.reward_personalities))
             dropdown_height = items_to_show * 25
-            dropdown_rect = pygame.Rect(personality_rect.x, personality_rect.bottom, personality_rect.width + 100, dropdown_height)
+            
+            # Detectar espacio disponible
+            window_height = 600  # Altura de la ventana de configuración
+            space_below = window_height - personality_rect.bottom
+            space_above = personality_rect.top
+            
+            # Calcular posición del dropdown usando la misma lógica
+            if space_below >= dropdown_height:
+                # Hay espacio suficiente hacia abajo
+                dropdown_rect = pygame.Rect(personality_rect.x, personality_rect.bottom, personality_rect.width + 100, dropdown_height)
+            elif space_above >= dropdown_height:
+                # No hay espacio abajo pero sí arriba
+                dropdown_rect = pygame.Rect(personality_rect.x, personality_rect.top - dropdown_height, personality_rect.width + 100, dropdown_height)
+            else:
+                # Poco espacio en ambas direcciones
+                if space_below > space_above:
+                    # Usar espacio disponible hacia abajo (reducido)
+                    available_height = max(100, space_below - 20)
+                    items_to_show = min(items_to_show, available_height // 25)
+                    dropdown_height = items_to_show * 25
+                    dropdown_rect = pygame.Rect(personality_rect.x, personality_rect.bottom, personality_rect.width + 100, dropdown_height)
+                else:
+                    # Usar espacio disponible hacia arriba (reducido)
+                    available_height = max(100, space_above - 20)
+                    items_to_show = min(items_to_show, available_height // 25)
+                    dropdown_height = items_to_show * 25
+                    dropdown_rect = pygame.Rect(personality_rect.x, personality_rect.top - dropdown_height, personality_rect.width + 100, dropdown_height)
             
             if dropdown_rect.collidepoint(mouse_x, mouse_y):
                 # Click dentro del dropdown - seleccionar personalidad
@@ -1801,9 +2063,10 @@ class MultiAgentVisualTrainer:
                 self.dropdown_scroll = 0
                 return agent_idx
         
-        # Botones de acción
-        apply_rect = pygame.Rect(650, 550, 70, 30)
-        cancel_rect = pygame.Rect(570, 550, 70, 30)
+        # 🎛️ BOTONES REORGANIZADOS - Esquina superior derecha (coordenadas actualizadas)
+        cancel_rect = pygame.Rect(640, 50, 70, 25)
+        apply_rect = pygame.Rect(720, 50, 70, 25)
+        random_rect = pygame.Rect(655, 85, 100, 25)  # 🎲 Centrado debajo
         
         if apply_rect.collidepoint(mouse_x, mouse_y):
             self.apply_personality_changes(selected_agents)
@@ -1811,6 +2074,10 @@ class MultiAgentVisualTrainer:
         elif cancel_rect.collidepoint(mouse_x, mouse_y):
             print("[CONFIG] Configuración de personalidades cancelada")
             return "close"  # Cerrar ventana
+        elif random_rect.collidepoint(mouse_x, mouse_y):
+            # 🎲 NUEVO: Asignar personalidades aleatorias
+            self.assign_random_personalities_to_selection(selected_agents)
+            return "random_assigned"  # Indicar que se asignaron personalidades aleatorias
         
         return None  # No hacer nada
     
@@ -1833,6 +2100,33 @@ class MultiAgentVisualTrainer:
         self.recreate_environments()
         
         print(f"[CONFIG] Personalidades aplicadas exitosamente")
+    
+    def assign_random_personalities_to_selection(self, selected_agents):
+        """🎲 Asigna personalidades aleatorias sin repetición a todos los agentes"""
+        import random
+        
+        print(f"[CONFIG] Asignando personalidades aleatorias...")
+        
+        # Crear lista de índices de personalidades disponibles
+        available_personalities = list(range(len(self.reward_personalities)))
+        
+        # Si hay más agentes que personalidades, permitir repeticiones
+        if self.num_agents > len(self.reward_personalities):
+            # Extender la lista para permitir repeticiones
+            while len(available_personalities) < self.num_agents:
+                available_personalities.extend(range(len(self.reward_personalities)))
+        
+        # Mezclar aleatoriamente
+        random.shuffle(available_personalities)
+        
+        # Asignar personalidades aleatorias a cada agente
+        for agent_idx in range(self.num_agents):
+            personality_idx = available_personalities[agent_idx]
+            selected_agents[agent_idx] = personality_idx
+            personality = self.reward_personalities[personality_idx]
+            print(f"[RANDOM] Agente {agent_idx + 1} -> {personality['name']} (ID: {personality_idx})")
+        
+        print(f"[CONFIG] Personalidades aleatorias asignadas exitosamente")
     
     def evolve_agents(self):
         """Sistema de evolución avanzado con múltiples criterios y diversidad genética"""
@@ -2815,13 +3109,30 @@ class MultiAgentVisualTrainer:
         
         # 📐 CONTROLES DE DIMENSIONES DEL GRID (FILA 3)
         if 'grid_width_down' in self.buttons:
-            # Botones de ancho del grid - Disponibles durante la pausa
-            grid_available = not (self.training_started and not self.paused)
+            # 🔧 CORREGIDO: Botones disponibles cuando NO está entrenando O cuando está pausado
+            grid_available = not self.training_started or self.paused
+            
+            # 🔍 DEBUG VISUAL: Verificar estado de botones
+            if hasattr(self, '_last_grid_state') and self._last_grid_state != grid_available:
+                print(f"[DEBUG VISUAL] Estado de botones cambió: {self._last_grid_state} -> {grid_available}")
+                print(f"[DEBUG VISUAL] training_started: {self.training_started}, paused: {self.paused}")
+            self._last_grid_state = grid_available
             
             if grid_available:
-                grid_color = self.ORANGE  # Disponible
+                grid_color = (0, 255, 0)  # 🔧 VERDE BRILLANTE para que sea MUY visible
+                color_name = "VERDE BRILLANTE"
             else:
                 grid_color = self.GRAY  # Bloqueado
+                color_name = "GRIS"
+            
+            # 🔍 DEBUG: Mostrar color actual cada cierto tiempo
+            if not hasattr(self, '_debug_counter'):
+                self._debug_counter = 0
+            self._debug_counter += 1
+            if self._debug_counter % 60 == 0:  # Cada segundo aprox
+                print(f"[DEBUG VISUAL] Botones de grid: {color_name} (disponible: {grid_available})")
+                print(f"[DEBUG VISUAL] Estados actuales: training_started={self.training_started}, paused={self.paused}")
+                print(f"[DEBUG VISUAL] Dimensiones actuales: {self.grid_width}x{self.grid_height}")
             
             pygame.draw.rect(self.screen, grid_color, self.buttons['grid_width_down'])
             pygame.draw.rect(self.screen, self.BLACK, self.buttons['grid_width_down'], 1)
@@ -2835,7 +3146,11 @@ class MultiAgentVisualTrainer:
             width_up_rect = width_up_text.get_rect(center=self.buttons['grid_width_up'].center)
             self.screen.blit(width_up_text, width_up_rect)
             
-            # Etiqueta de ancho
+            # 🔍 DEBUG: Etiqueta de ancho con debug
+            if not hasattr(self, '_last_width') or self._last_width != self.grid_width:
+                print(f"[DEBUG VISUAL] Ancho cambió: {getattr(self, '_last_width', 'N/A')} -> {self.grid_width}")
+                self._last_width = self.grid_width
+            
             width_label = self.font_small.render(f"Ancho: {self.grid_width}", True, self.BLACK)
             width_center_x = (self.buttons['grid_width_down'].x + self.buttons['grid_width_up'].x + self.buttons['grid_width_up'].width) // 2
             label_y = max(self.buttons['grid_width_down'].y - 15, self.controls_area.y + 110)
@@ -2849,11 +3164,11 @@ class MultiAgentVisualTrainer:
                 self.screen.blit(pause_hint, (hint_x, hint_y))
         
         if 'grid_height_down' in self.buttons:
-            # Botones de alto del grid - Disponibles durante la pausa
-            grid_available = not (self.training_started and not self.paused)
+            # 🔧 CORREGIDO: Botones disponibles cuando NO está entrenando O cuando está pausado
+            grid_available = not self.training_started or self.paused
             
             if grid_available:
-                grid_color = self.ORANGE  # Disponible
+                grid_color = (0, 255, 0)  # 🔧 VERDE BRILLANTE para que sea MUY visible
             else:
                 grid_color = self.GRAY  # Bloqueado
             
@@ -2869,18 +3184,22 @@ class MultiAgentVisualTrainer:
             height_up_rect = height_up_text.get_rect(center=self.buttons['grid_height_up'].center)
             self.screen.blit(height_up_text, height_up_rect)
             
-            # Etiqueta de alto
+            # 🔍 DEBUG: Etiqueta de alto con debug
+            if not hasattr(self, '_last_height') or self._last_height != self.grid_height:
+                print(f"[DEBUG VISUAL] Alto cambió: {getattr(self, '_last_height', 'N/A')} -> {self.grid_height}")
+                self._last_height = self.grid_height
+            
             height_label = self.font_small.render(f"Alto: {self.grid_height}", True, self.BLACK)
             height_center_x = (self.buttons['grid_height_down'].x + self.buttons['grid_height_up'].x + self.buttons['grid_height_up'].width) // 2
             label_y = max(self.buttons['grid_height_down'].y - 15, self.controls_area.y + 110)
             self.screen.blit(height_label, (height_center_x - height_label.get_width()//2, label_y))
         
         if 'grid_reset' in self.buttons:
-            # Botón de reset de dimensiones - Disponible durante la pausa
-            grid_available = not (self.training_started and not self.paused)
+            # 🔧 CORREGIDO: Botón disponible cuando NO está entrenando O cuando está pausado
+            grid_available = not self.training_started or self.paused
             
             if grid_available:
-                reset_color = self.RED  # Disponible
+                reset_color = (255, 0, 255)  # 🔧 MAGENTA BRILLANTE para que sea MUY visible
             else:
                 reset_color = self.GRAY  # Bloqueado
             

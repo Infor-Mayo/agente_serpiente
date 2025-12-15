@@ -37,7 +37,7 @@ class GameApp:
         self.current_height = WINDOW_HEIGHT
         
         # Variables de configuración
-        self.num_agents = 3  # Número de agentes por defecto
+        self.num_agents = 6  # Número de agentes por defecto
         self.cell_size = CELL_SIZE  # Tamaño de celda configurable
         self.grid_width = GRID_WIDTH
         self.grid_height = GRID_HEIGHT
