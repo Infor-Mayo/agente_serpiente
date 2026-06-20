@@ -31,6 +31,9 @@ MANIFEST
 *.tmp
 *.temp
 
+# Emergency checkpoints del entrenamiento
+models/emergency/
+
 # IDE
 .vscode/
 .idea/
