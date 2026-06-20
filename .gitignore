@@ -23,16 +23,14 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyTorch models (opcional - descomenta si no quieres subir modelos)
-# models/*.pth
+# PyTorch models (NO subir modelos entrenados al repo)
+*.pth
+models/
 
 # Logs y archivos temporales
 *.log
 *.tmp
 *.temp
-
-# Emergency checkpoints del entrenamiento
-models/emergency/
 
 # IDE
 .vscode/
