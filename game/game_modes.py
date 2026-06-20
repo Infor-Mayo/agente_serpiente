@@ -20,17 +20,37 @@ class GameMode(Enum):
     CONFIG = 7
 
 PLAYER_COLORS = [
-    (0, 255, 0),   # Humano - Verde
-    (255, 0, 0),   # IA 1 - Rojo
-    (0, 0, 255),   # IA 2 - Azul
-    (255, 255, 0), # IA 3 - Amarillo
-    (255, 0, 255), # IA 4 - Magenta
-    (0, 255, 255), # IA 5 - Cyan
-    (255, 128, 0), # IA 6 - Naranja
-    (128, 255, 0), # IA 7 - Verde Lima
-    (255, 128, 128), # IA 8 - Rosa
-    (128, 128, 255), # IA 9 - Azul Claro
-    (255, 255, 128), # IA 10 - Amarillo Claro
+    (0, 255, 0),       # Humano - Verde
+    (255, 0, 0),       # IA 1 - Rojo
+    (0, 0, 255),       # IA 2 - Azul
+    (255, 255, 0),     # IA 3 - Amarillo
+    (255, 0, 255),     # IA 4 - Magenta
+    (0, 255, 255),     # IA 5 - Cyan
+    (255, 128, 0),     # IA 6 - Naranja
+    (128, 255, 0),     # IA 7 - Verde Lima
+    (255, 128, 128),   # IA 8 - Rosa
+    (128, 128, 255),   # IA 9 - Azul Claro
+    (255, 255, 128),   # IA 10 - Amarillo Claro
+    (128, 0, 255),     # IA 11 - Púrpura
+    (255, 192, 203),   # IA 12 - Rosa Claro
+    (0, 128, 255),     # IA 13 - Azul Cielo
+    (255, 165, 0),     # IA 14 - Naranja Oscuro
+    (50, 205, 50),     # IA 15 - Verde Lima Oscuro
+    (255, 20, 147),    # IA 16 - Rosa Profundo
+    (0, 191, 255),     # IA 17 - Azul Cielo Profundo
+    (255, 140, 0),     # IA 18 - Naranja Oscuro
+    (32, 178, 170),    # IA 19 - Turquesa
+    (255, 69, 0),      # IA 20 - Rojo Naranja
+    (138, 43, 226),    # IA 21 - Azul Violeta
+    (255, 160, 122),   # IA 22 - Salmón
+    (72, 209, 204),    # IA 23 - Turquesa Medio
+    (255, 105, 180),   # IA 24 - Rosa Caliente
+    (30, 144, 255),    # IA 25 - Azul Dodger
+    (255, 215, 0),     # IA 26 - Dorado
+    (199, 21, 133),    # IA 27 - Magenta Medio
+    (0, 206, 209),     # IA 28 - Turquesa Oscuro
+    (255, 127, 80),    # IA 29 - Coral
+    (64, 224, 208),    # IA 30 - Turquesa Claro
 ]
 
 def load_models():

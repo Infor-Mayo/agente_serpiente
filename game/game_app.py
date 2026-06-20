@@ -13,6 +13,11 @@ WINDOW_HEIGHT = 800
 GAME_AREA_WIDTH = GRID_WIDTH * CELL_SIZE
 GAME_AREA_HEIGHT = GRID_HEIGHT * CELL_SIZE
 
+# Límites configurables
+MAX_AGENTS = 20  # Aumentado de 8 a 20
+MAX_CELL_SIZE = 60  # Aumentado de 35 a 60
+MIN_CELL_SIZE = 15
+
 class GameApp:
     def __init__(self):
         pygame.init()
@@ -41,6 +46,21 @@ class GameApp:
         self.cell_size = CELL_SIZE  # Tamaño de celda configurable
         self.grid_width = GRID_WIDTH
         self.grid_height = GRID_HEIGHT
+        self.auto_resize = True  # Activar redimensionamiento automático responsive
+        self.rounds_enabled = True
+        self.rounds_limit = 0
+        self.current_round = 0
+        self.pre_round_banner_enabled = True
+        self.pre_round_banner_duration = 1.0
+        self.pre_round_banner_until = 0.0
+        self.game_over_time = None
+        self.game_over_auto_restart_seconds = 5.0
+        self.death_log = []
+        self.ia_grace_until = {}
+        
+        # Variables para scroll del ranking
+        self.ranking_scroll_offset = 0
+        self.max_visible_players = 10  # Número máximo de jugadores visibles sin scroll
         
         self.reset_game()
         self.create_main_menu()
@@ -53,6 +73,9 @@ class GameApp:
         self.food = None
         self.start_time = None
         self.winner = None
+        self.ranking_scroll_offset = 0  # Resetear scroll al iniciar nuevo juego
+        self.death_log = []
+        self.ia_grace_until = {}
 
     def create_main_menu(self):
         self.menu_buttons = []
@@ -73,6 +96,10 @@ class GameApp:
                 self.start_solo_ia()
             elif mode == GameMode.CONFIG:
                 self.create_config_menu()
+            if self.rounds_enabled and mode in (GameMode.HUMAN, GameMode.HUMAN_VS_IA, GameMode.IA_VS_IA, GameMode.SOLO_IA):
+                self.current_round = 1
+                if self.pre_round_banner_enabled:
+                    self.pre_round_banner_until = time.time() + self.pre_round_banner_duration
         self.menu_buttons.append(Button((x, y0, btn_w, btn_h), "Solo Humano", self.font, (60,180,60), (255,255,255), (100,220,100), lambda: set_mode(GameMode.HUMAN)))
         self.menu_buttons.append(Button((x, y0+spacing, btn_w, btn_h), "Humano vs IA", self.font, (60,60,180), (255,255,255), (100,100,220), lambda: set_mode(GameMode.HUMAN_VS_IA)))
         self.menu_buttons.append(Button((x, y0+2*spacing, btn_w, btn_h), "IA vs IA", self.font, (200,120,50), (255,255,255), (230,180,80), lambda: set_mode(GameMode.IA_VS_IA)))
@@ -100,6 +127,9 @@ class GameApp:
                 self.current_width = event.w
                 self.current_height = event.h
                 self.screen = pygame.display.set_mode((self.current_width, self.current_height), pygame.RESIZABLE)
+                # Ajustar tamaño de celda automáticamente si está activado
+                if self.auto_resize and self.mode in (GameMode.HUMAN, GameMode.HUMAN_VS_IA, GameMode.IA_VS_IA, GameMode.SOLO_IA):
+                    self.auto_adjust_cell_size()
                 # Recrear menús para ajustar posiciones
                 if self.mode == GameMode.MAIN_MENU:
                     self.create_main_menu()
@@ -116,6 +146,20 @@ class GameApp:
             elif self.mode == GameMode.GAME_OVER:
                 for btn in self.menu_buttons:
                     btn.handle_event(event)
+                # Scroll del ranking en game over
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_UP:
+                        if self.ranking_scroll_offset > 0:
+                            self.ranking_scroll_offset -= 1
+                    elif event.key == pygame.K_DOWN:
+                        total_players = len(self.ia_agents) + (1 if self.human_env is not None else 0)
+                        max_scroll = max(0, total_players - 10)
+                        if self.ranking_scroll_offset < max_scroll:
+                            self.ranking_scroll_offset += 1
+                elif event.type == pygame.MOUSEWHEEL:
+                    total_players = len(self.ia_agents) + (1 if self.human_env is not None else 0)
+                    max_scroll = max(0, total_players - 10)
+                    self.ranking_scroll_offset = max(0, min(max_scroll, self.ranking_scroll_offset - event.y))
             
             elif self.mode == GameMode.CONFIG:
                 for btn in self.menu_buttons:
@@ -139,6 +183,18 @@ class GameApp:
                     elif event.key == pygame.K_ESCAPE:
                         self.mode = GameMode.MAIN_MENU
                         self.create_main_menu()
+                    # Scroll del ranking
+                    elif event.key == pygame.K_UP:
+                        if self.ranking_scroll_offset > 0:
+                            self.ranking_scroll_offset -= 1
+                    elif event.key == pygame.K_DOWN:
+                        max_scroll = max(0, len(self.ia_agents) + (1 if self.human_env else 0) - self.max_visible_players)
+                        if self.ranking_scroll_offset < max_scroll:
+                            self.ranking_scroll_offset += 1
+                elif event.type == pygame.MOUSEWHEEL:
+                    # Scroll con rueda del mouse
+                    max_scroll = max(0, len(self.ia_agents) + (1 if self.human_env else 0) - self.max_visible_players)
+                    self.ranking_scroll_offset = max(0, min(max_scroll, self.ranking_scroll_offset - event.y))
 
     def update(self):
         if self.mode == GameMode.HUMAN:
@@ -149,6 +205,8 @@ class GameApp:
             self.update_ia_vs_ia()
         elif self.mode == GameMode.SOLO_IA:
             self.update_solo_ia()
+        elif self.mode == GameMode.GAME_OVER:
+            self.update_game_over()
 
     def render(self):
         self.screen.fill((18,18,18))
@@ -172,18 +230,29 @@ class GameApp:
         self.screen.blit(txt, (self.current_width//2-txt.get_width()//2, 200))
 
     def render_game_over(self):
+        # Calcular posiciones responsive
+        center_x = self.current_width // 2
+        title_y = min(80, self.current_height // 10)
+        winner_y = title_y + 60
+        ranking_title_y = winner_y + 50
+        
         # Título
         title = self.font_big.render("GAME OVER", True, (255,80,80))
-        self.screen.blit(title, title.get_rect(center=(self.current_width//2, 120)))
+        self.screen.blit(title, title.get_rect(center=(center_x, title_y)))
         
         # Ganador destacado
         if self.winner:
             winner_txt = self.font.render(f"GANADOR: {self.winner}", True, (255,215,0))
-            self.screen.blit(winner_txt, winner_txt.get_rect(center=(self.current_width//2, 180)))
+            self.screen.blit(winner_txt, winner_txt.get_rect(center=(center_x, winner_y)))
+        
+        if self.rounds_enabled and self.game_over_time is not None:
+            remaining = max(0, int(self.game_over_auto_restart_seconds - (time.time() - self.game_over_time)))
+            auto_txt = self.font_small.render(f"Reinicio automático en {remaining}s", True, (200,200,200))
+            self.screen.blit(auto_txt, auto_txt.get_rect(center=(center_x, winner_y + 30)))
         
         # Tabla de posiciones
         ranking_title = self.font.render("TABLA DE POSICIONES", True, (255,255,255))
-        self.screen.blit(ranking_title, ranking_title.get_rect(center=(self.current_width//2, 230)))
+        self.screen.blit(ranking_title, ranking_title.get_rect(center=(center_x, ranking_title_y)))
         
         # Crear lista de jugadores con scores para ranking
         players_ranking = []
@@ -206,7 +275,7 @@ class GameApp:
                 color_idx = i + 1
             else:
                 score_idx = i
-                color_idx = i
+                color_idx = i + 1  # +1 porque el índice 0 es para el humano
                 
             env = self.ia_envs[i] if i < len(self.ia_envs) else None
             status = "[DEAD]" if (env and env.done) else "[AI]"
@@ -224,10 +293,44 @@ class GameApp:
         # Ordenar por score (descendente)
         players_ranking.sort(key=lambda x: x['score'], reverse=True)
         
-        # Dibujar ranking
-        y_start = 280
-        for rank, player in enumerate(players_ranking):
-            y = y_start + rank * 35
+        # Calcular área de ranking con scroll
+        ranking_start_y = ranking_title_y + 40
+        ranking_width = min(600, self.current_width - 40)
+        ranking_x = (self.current_width - ranking_width) // 2
+        
+        # Calcular altura disponible para el ranking
+        buttons_y = self.current_height - 100  # Espacio para botones
+        max_ranking_height = buttons_y - ranking_start_y - 20
+        
+        item_height = 35
+        max_visible_items = max_ranking_height // item_height
+        total_items = len(players_ranking)
+        
+        # Ajustar scroll si es necesario
+        max_scroll = max(0, total_items - max_visible_items)
+        self.ranking_scroll_offset = min(self.ranking_scroll_offset, max_scroll)
+        
+        # Ajustar ancho del ranking si hay scroll para evitar solapamiento
+        scroll_bar_space = 15 if total_items > max_visible_items else 0
+        ranking_display_width = ranking_width - scroll_bar_space
+        
+        # Dibujar fondo del ranking
+        ranking_height = min(total_items * item_height + 10, max_ranking_height)
+        ranking_bg = pygame.Rect(ranking_x, ranking_start_y, ranking_width, ranking_height)
+        pygame.draw.rect(self.screen, (20, 20, 20, 200), ranking_bg, border_radius=8)
+        pygame.draw.rect(self.screen, (100, 100, 100), ranking_bg, 2, border_radius=8)
+        
+        # Dibujar ranking con scroll
+        visible_players = players_ranking[self.ranking_scroll_offset:self.ranking_scroll_offset + max_visible_items]
+        y_start = ranking_start_y + 10
+        
+        for display_rank, player in enumerate(visible_players):
+            rank = self.ranking_scroll_offset + display_rank
+            y = y_start + display_rank * item_height
+            
+            # Verificar que esté dentro del área visible
+            if y < ranking_start_y or y > ranking_start_y + ranking_height:
+                continue
             
             # Medalla por posición
             medals = ["1st", "2nd", "3rd"]
@@ -235,28 +338,75 @@ class GameApp:
             
             # Destacar ganador con fondo dorado
             if player['is_winner']:
-                bg_rect = pygame.Rect(WINDOW_WIDTH//2 - 200, y - 5, 400, 30)
+                bg_rect = pygame.Rect(ranking_x + 10, y - 5, ranking_display_width - 20, 30)
                 pygame.draw.rect(self.screen, (255,215,0,50), bg_rect, border_radius=5)
                 pygame.draw.rect(self.screen, (255,215,0), bg_rect, 2, border_radius=5)
             
-            # Texto del ranking
+            # Texto del ranking (acortar si es necesario)
+            max_name_length = 15
+            player_name = player['name'][:max_name_length] if len(player['name']) > max_name_length else player['name']
             if 'trained' in player:
-                ranking_text = f"{medal} {player['status']} {player['trained']} {player['name']}: {player['score']} pts"
+                ranking_text = f"{medal} {player['status']} {player['trained']} {player_name}: {player['score']} pts"
             else:
-                ranking_text = f"{medal} {player['status']} {player['name']}: {player['score']} pts"
+                ranking_text = f"{medal} {player['status']} {player_name}: {player['score']} pts"
             
             txt = self.font_small.render(ranking_text, True, player['color'])
-            self.screen.blit(txt, (WINDOW_WIDTH//2 - 180, y))
+            
+            # Ajustar ancho máximo para evitar solapamiento con scroll
+            max_text_width = ranking_display_width - 40
+            if txt.get_width() > max_text_width:
+                # Truncar texto si es muy largo
+                truncated_text = ranking_text[:max(0, len(ranking_text) - 5)] + "..."
+                txt = self.font_small.render(truncated_text, True, player['color'])
+            
+            self.screen.blit(txt, (ranking_x + 20, y))
+        
+        # Dibujar scrollbar si es necesario
+        if total_items > max_visible_items:
+            scroll_bar_width = 8
+            scroll_bar_x = ranking_x + ranking_width - scroll_bar_width - 5
+            scroll_bar_height = ranking_height - 20
+            scroll_bar_y = ranking_start_y + 10
+            
+            # Fondo de la barra de scroll
+            pygame.draw.rect(self.screen, (50, 50, 50), 
+                           (scroll_bar_x, scroll_bar_y, scroll_bar_width, scroll_bar_height), 
+                           border_radius=4)
+            
+            # Indicador de posición
+            scroll_ratio = self.ranking_scroll_offset / max_scroll if max_scroll > 0 else 0
+            indicator_height = max(20, int(scroll_bar_height * (max_visible_items / total_items)))
+            indicator_y = scroll_bar_y + int((scroll_bar_height - indicator_height) * scroll_ratio)
+            
+            pygame.draw.rect(self.screen, (150, 150, 150), 
+                           (scroll_bar_x, indicator_y, scroll_bar_width, indicator_height), 
+                           border_radius=4)
         
         # Botones
         for btn in self.menu_buttons:
             btn.draw(self.screen)
 
     def render_game(self):
+        # Ajustar tamaño de celda automáticamente si está activado
+        if self.auto_resize:
+            self.auto_adjust_cell_size()
+        
         # Área de juego centrada dinámicamente usando tamaño configurable
         game_area_width = self.grid_width * self.cell_size
         game_area_height = self.grid_height * self.cell_size
-        area = pygame.Rect((self.current_width-game_area_width)//2, 80, game_area_width, game_area_height)
+        
+        # Calcular posición centrada con margen superior para UI
+        margin_top = 80
+        if self.pre_round_banner_enabled and time.time() < self.pre_round_banner_until:
+            margin_top += 20
+        area_x = (self.current_width - game_area_width) // 2
+        area_y = margin_top
+        
+        # Si la ventana es muy pequeña (vertical), ajustar margen superior
+        if self.current_height < 600:
+            area_y = 60
+        
+        area = pygame.Rect(area_x, area_y, game_area_width, game_area_height)
         pygame.draw.rect(self.screen, (30,30,30), area, border_radius=8)
         pygame.draw.rect(self.screen, (200,200,200), area, 2, border_radius=8)
         
@@ -266,7 +416,9 @@ class GameApp:
         
         for i, env in enumerate(self.ia_envs):
             if env and not env.done:
-                self.draw_snake(env, PLAYER_COLORS[i+1], area)
+                # Usar módulo para repetir colores si hay más IAs que colores disponibles
+                color_idx = (i + 1) % len(PLAYER_COLORS)
+                self.draw_snake(env, PLAYER_COLORS[color_idx], area)
         
         # Dibujar comida
         if self.food:
@@ -284,6 +436,18 @@ class GameApp:
         # Mostrar controles de pausa
         pause_txt = self.font_small.render("ESPACIO: Pausar | ESC: Menu", True, (150,150,150))
         self.screen.blit(pause_txt, (self.current_width - pause_txt.get_width() - 20, 20))
+        
+        if self.rounds_enabled and self.current_round > 0:
+            if self.rounds_limit > 0:
+                rt_txt = f"Ronda {self.current_round}/{self.rounds_limit}"
+            else:
+                rt_txt = f"Ronda {self.current_round}"
+            round_txt = self.font.render(rt_txt, True, (255,255,255))
+            self.screen.blit(round_txt, (self.current_width - round_txt.get_width() - 20, 60))
+        
+        if self.pre_round_banner_enabled and time.time() < self.pre_round_banner_until:
+            banner = self.font_big.render(f"RONDA {self.current_round}", True, (255,255,0))
+            self.screen.blit(banner, banner.get_rect(center=(self.current_width//2, 50)))
 
     def draw_snake(self, env, color, area):
         """Dibuja una serpiente en el área de juego"""
@@ -339,20 +503,49 @@ class GameApp:
                 'name': name,
                 'score': score,
                 'is_dead': env.done,
-                'color': PLAYER_COLORS[i+1],
+                'color': PLAYER_COLORS[(i + 1) % len(PLAYER_COLORS)],
                 'type': trained_indicator
             })
         
         # Ordenar por score (mayor a menor), luego por estado (vivos primero)
         players_list.sort(key=lambda x: (x['score'], not x['is_dead']), reverse=True)
         
-        # Posicionar ranking completamente a la derecha sin solapamiento
+        # Posicionar ranking responsive según el tamaño de la ventana
         game_area_width = self.grid_width * self.cell_size
+        game_area_height = self.grid_height * self.cell_size
         game_area_right = (self.current_width + game_area_width) // 2  # Borde derecho del área de juego
-        ranking_x = game_area_right + 20  # 20px de margen desde el borde del juego
-        ranking_y = 100  # Más abajo para evitar controles
-        ranking_width = self.current_width - ranking_x - 20  # Usar el espacio disponible hasta el borde
-        ranking_height = len(players_list) * 22 + 35
+        
+        # Detectar si estamos en modo vertical (aspecto 9:16 o similar)
+        aspect_ratio = self.current_height / self.current_width if self.current_width > 0 else 1
+        is_vertical = aspect_ratio > 1.2 or self.current_width < 1000
+        
+        # Calcular valores necesarios para el scroll antes de usarlos
+        total_players = len(players_list)
+        item_height = 22
+        
+        if is_vertical:
+            # Modo vertical: ranking debajo del juego
+            margin_top = 80 if self.current_height >= 600 else 60
+            ranking_x = 20
+            ranking_y = margin_top + game_area_height + 20
+            ranking_width = self.current_width - 40
+            # Limitar altura del ranking si es muy largo
+            max_ranking_height = self.current_height - ranking_y - 40
+            ranking_height = min(total_players * item_height + 35, max_ranking_height)
+        else:
+            # Modo horizontal: ranking a la derecha
+            ranking_x = game_area_right + 20
+            ranking_y = 100
+            ranking_width = self.current_width - ranking_x - 20
+            ranking_height = total_players * item_height + 35
+        
+        # Calcular scroll del ranking
+        visible_height = ranking_height - 35  # Altura disponible para jugadores
+        max_visible = visible_height // item_height
+        
+        # Ajustar ancho del ranking si hay scroll para evitar solapamiento
+        scroll_bar_space = 15 if total_players > max_visible else 0
+        ranking_display_width = ranking_width - scroll_bar_space
         
         # Fondo del ranking
         ranking_bg = pygame.Rect(ranking_x, ranking_y, ranking_width, ranking_height)
@@ -361,17 +554,28 @@ class GameApp:
         
         # Título del ranking (más compacto)
         ranking_title = self.font_small.render("RANKING", True, (255, 255, 0))
-        title_x = ranking_x + (ranking_width - ranking_title.get_width()) // 2
+        title_x = ranking_x + (ranking_display_width - ranking_title.get_width()) // 2
         self.screen.blit(ranking_title, (title_x, ranking_y + 5))
         
         # Línea separadora
         line_y = ranking_y + 25
-        pygame.draw.line(self.screen, (100, 100, 100), (ranking_x + 10, line_y), (ranking_x + ranking_width - 10, line_y), 1)
+        pygame.draw.line(self.screen, (100, 100, 100), (ranking_x + 10, line_y), (ranking_x + ranking_display_width - 10, line_y), 1)
         
-        # Dibujar ranking
+        # Ajustar scroll offset si es necesario
+        max_scroll = max(0, total_players - max_visible)
+        self.ranking_scroll_offset = min(self.ranking_scroll_offset, max_scroll)
+        
+        # Dibujar ranking con scroll
         y_start = ranking_y + 35
-        for rank, player in enumerate(players_list):
-            y = y_start + rank * 22
+        visible_players = players_list[self.ranking_scroll_offset:self.ranking_scroll_offset + max_visible]
+        
+        for display_rank, player in enumerate(visible_players):
+            rank = self.ranking_scroll_offset + display_rank
+            y = y_start + display_rank * item_height
+            
+            # Verificar que esté dentro del área visible
+            if y < ranking_y + 35 or y > ranking_y + ranking_height - 5:
+                continue
             
             # Medallas para los primeros 3 lugares
             if rank == 0:
@@ -404,14 +608,51 @@ class GameApp:
             else:
                 color = player['color']
             
-            # Renderizar nombre y score (más separado de la posición)
+            # Renderizar nombre y score (ajustar ancho máximo para evitar solapamiento con scroll)
+            max_text_width = ranking_display_width - 60  # Dejar espacio para medalla y scroll
             name_txt = self.font_small.render(name_text, True, color)
-            self.screen.blit(name_txt, (ranking_x + 50, y))  # Movido de 35 a 50
+            
+            if name_txt.get_width() > max_text_width:
+                # Truncar texto si es muy largo
+                truncated_text = name_text[:max(0, len(name_text) - 5)] + "..."
+                name_txt = self.font_small.render(truncated_text, True, color)
+            
+            self.screen.blit(name_txt, (ranking_x + 50, y))
             
             # Dibujar línea tachada si está eliminado
             if player['is_dead']:
-                text_width = name_txt.get_width()
+                text_width = min(name_txt.get_width(), max_text_width)
                 pygame.draw.line(self.screen, (255, 0, 0), (ranking_x + 50, y + 8), (ranking_x + 50 + text_width - 10, y + 8), 2)
+        
+        # Dibujar indicador de scroll si es necesario
+        if total_players > max_visible:
+            # Barra de scroll
+            scroll_bar_width = 8
+            scroll_bar_x = ranking_x + ranking_width - scroll_bar_width - 5
+            scroll_bar_height = ranking_height - 35
+            scroll_bar_y = ranking_y + 35
+            
+            # Fondo de la barra de scroll
+            pygame.draw.rect(self.screen, (50, 50, 50), 
+                           (scroll_bar_x, scroll_bar_y, scroll_bar_width, scroll_bar_height), 
+                           border_radius=4)
+            
+            # Indicador de posición
+            scroll_ratio = self.ranking_scroll_offset / max_scroll if max_scroll > 0 else 0
+            indicator_height = max(20, int(scroll_bar_height * (max_visible / total_players)))
+            indicator_y = scroll_bar_y + int((scroll_bar_height - indicator_height) * scroll_ratio)
+            
+            pygame.draw.rect(self.screen, (150, 150, 150), 
+                           (scroll_bar_x, indicator_y, scroll_bar_width, indicator_height), 
+                           border_radius=4)
+            
+            # Indicador de más contenido arriba/abajo
+            if self.ranking_scroll_offset > 0:
+                arrow_up = self.font_small.render("▲", True, (200, 200, 200))
+                self.screen.blit(arrow_up, (ranking_x + ranking_width - 20, ranking_y + 5))
+            if self.ranking_scroll_offset < max_scroll:
+                arrow_down = self.font_small.render("▼", True, (200, 200, 200))
+                self.screen.blit(arrow_down, (ranking_x + ranking_width - 20, ranking_y + ranking_height - 20))
 
     def generate_food(self):
         """Genera comida en posición aleatoria no ocupada"""
@@ -534,68 +775,198 @@ class GameApp:
         # Centrar botones con mucho más espacio
         center_x = self.current_width // 2
         
-        # Botones para número de agentes (bien separados)
+        # Calcular posiciones responsive para botones
+        base_y = min(120, self.current_height // 12) + 60
+        spacing = min(50, (self.current_height - base_y - 200) // 8)
         btn_w, btn_h = 100, 50
-        y_agents = 250
-        gap = 200  # Espacio entre botones
+        gap = min(200, self.current_width // 3)
+        
+        # Botones para número de agentes
+        y_agents = base_y + spacing
         self.menu_buttons.append(Button((center_x - gap//2 - btn_w, y_agents, btn_w, btn_h), "- Agentes", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.decrease_agents))
         self.menu_buttons.append(Button((center_x + gap//2, y_agents, btn_w, btn_h), "+ Agentes", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.increase_agents))
         
-        # Botones para tamaño de celda (bien separados)
-        y_size = 380
+        # Botones para tamaño de celda
+        y_size = y_agents + spacing * 2
         self.menu_buttons.append(Button((center_x - gap//2 - btn_w, y_size, btn_w, btn_h), "- Tamaño", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.decrease_cell_size))
         self.menu_buttons.append(Button((center_x + gap//2, y_size, btn_w, btn_h), "+ Tamaño", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.increase_cell_size))
         
-        # Botón volver (más abajo)
+        # Botón para activar/desactivar auto-resize
+        y_auto = y_size + spacing * 2
+        btn_auto_w = 200
+        auto_text = "Auto-Resize: ON" if self.auto_resize else "Auto-Resize: OFF"
+        auto_color = (60,180,60) if self.auto_resize else (100,100,100)
+        self.menu_buttons.append(Button((center_x - btn_auto_w//2, y_auto, btn_auto_w, btn_h), auto_text, self.font_small, auto_color, (255,255,255), (100,220,100) if self.auto_resize else (150,150,150), self.toggle_auto_resize))
+        
+        y_rounds = y_auto + spacing * 2
+        btn_rounds_w = 200
+        rounds_text = "Rondas: ON" if self.rounds_enabled else "Rondas: OFF"
+        rounds_color = (60,180,60) if self.rounds_enabled else (100,100,100)
+        self.menu_buttons.append(Button((center_x - btn_rounds_w//2, y_rounds, btn_rounds_w, btn_h), rounds_text, self.font_small, rounds_color, (255,255,255), (100,220,100) if self.rounds_enabled else (150,150,150), self.toggle_rounds_enabled))
+        
+        y_rounds_limit = y_rounds + spacing
+        self.menu_buttons.append(Button((center_x - gap//2 - btn_w, y_rounds_limit, btn_w, btn_h), "- Rondas", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.decrease_rounds_limit))
+        self.menu_buttons.append(Button((center_x + gap//2, y_rounds_limit, btn_w, btn_h), "+ Rondas", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.increase_rounds_limit))
+        
+        y_pre_banner = y_rounds_limit + spacing
+        btn_pre_w = 260
+        pre_text = "Banner Pre-Ronda: ON" if self.pre_round_banner_enabled else "Banner Pre-Ronda: OFF"
+        pre_color = (60,180,60) if self.pre_round_banner_enabled else (100,100,100)
+        self.menu_buttons.append(Button((center_x - btn_pre_w//2, y_pre_banner, btn_pre_w, btn_h), pre_text, self.font_small, pre_color, (255,255,255), (100,220,100) if self.pre_round_banner_enabled else (150,150,150), self.toggle_pre_round_banner))
+        
+        # Botón volver (ajustar según altura disponible)
         btn_back_w = 300
-        self.menu_buttons.append(Button((center_x - btn_back_w//2, 550, btn_back_w, 60), "Volver al Menu", self.font, (100,100,100), (255,255,255), (150,150,150), self.go_to_main_menu))
+        back_y = min(y_auto + spacing * 2, self.current_height - 80)
+        self.menu_buttons.append(Button((center_x - btn_back_w//2, back_y, btn_back_w, 60), "Volver al Menu", self.font, (100,100,100), (255,255,255), (150,150,150), self.go_to_main_menu))
 
     def decrease_agents(self):
         if self.num_agents > 2:
             self.num_agents -= 1
 
     def increase_agents(self):
-        if self.num_agents < 8:
+        if self.num_agents < MAX_AGENTS:
             self.num_agents += 1
 
     def decrease_cell_size(self):
-        if self.cell_size > 15:
+        if self.cell_size > MIN_CELL_SIZE:
             self.cell_size -= 5
+            self.auto_resize = False  # Desactivar auto-resize cuando se ajusta manualmente
 
     def increase_cell_size(self):
-        if self.cell_size < 35:
+        if self.cell_size < MAX_CELL_SIZE:
             self.cell_size += 5
+            self.auto_resize = False  # Desactivar auto-resize cuando se ajusta manualmente
+    
+    def toggle_auto_resize(self):
+        """Activa o desactiva el redimensionamiento automático"""
+        self.auto_resize = not self.auto_resize
+        if self.mode == GameMode.CONFIG:
+            self.create_config_menu()
+    
+    def toggle_rounds_enabled(self):
+        self.rounds_enabled = not self.rounds_enabled
+        if self.mode == GameMode.CONFIG:
+            self.create_config_menu()
+    
+    def decrease_rounds_limit(self):
+        if self.rounds_limit > 0:
+            self.rounds_limit -= 1
+        else:
+            self.rounds_limit = 0
+        if self.mode == GameMode.CONFIG:
+            self.create_config_menu()
+    
+    def increase_rounds_limit(self):
+        self.rounds_limit += 1
+        if self.mode == GameMode.CONFIG:
+            self.create_config_menu()
+    
+    def toggle_pre_round_banner(self):
+        self.pre_round_banner_enabled = not self.pre_round_banner_enabled
+        if self.mode == GameMode.CONFIG:
+            self.create_config_menu()
+    
+    def auto_adjust_cell_size(self):
+        """Ajusta automáticamente el tamaño de celda según el tamaño de la ventana"""
+        if not self.auto_resize:
+            return
+        
+        # Margenes base de UI
+        side_margin = 40
+        top_margin = 80
+        bottom_margin = 60
+        if self.pre_round_banner_enabled and time.time() < self.pre_round_banner_until:
+            top_margin += 20
+        
+        # Determinar orientación para reservar espacio de ranking
+        aspect_ratio = self.current_height / self.current_width if self.current_width > 0 else 1
+        is_vertical = aspect_ratio > 1.2 or self.current_width < 1000
+        
+        # Estimar número de jugadores para calcular tamaño de ranking
+        total_players = (1 if self.human_env else 0) + len(self.ia_agents)
+        if total_players == 0:
+            total_players = self.num_agents
+        item_height = 22
+        
+        if is_vertical:
+            # Ranking debajo del área de juego
+            estimated_ranking_height = min(total_players * item_height + 35, 220)
+            available_width = self.current_width - (2 * side_margin)
+            available_height = self.current_height - (top_margin + bottom_margin + estimated_ranking_height + 20)
+        else:
+            # Ranking a la derecha del área de juego
+            reserved_right = max(260, min(int(self.current_width * 0.28), self.current_width // 2 - side_margin))
+            available_width = self.current_width - (2 * side_margin + reserved_right + 20)
+            available_height = self.current_height - (top_margin + bottom_margin)
+        
+        # Proteger contra tamaños negativos en ventanas muy pequeñas
+        available_width = max(100, available_width)
+        available_height = max(100, available_height)
+        
+        # Calcular tamaño de celda
+        cell_size_by_width = available_width // self.grid_width
+        cell_size_by_height = available_height // self.grid_height
+        optimal_cell_size = min(cell_size_by_width, cell_size_by_height)
+        
+        # Asegurar límites
+        optimal_cell_size = max(MIN_CELL_SIZE, min(optimal_cell_size, MAX_CELL_SIZE))
+        
+        # Ajustar si el cambio es significativo
+        if abs(optimal_cell_size - self.cell_size) > 2:
+            self.cell_size = optimal_cell_size
 
     def render_config(self):
         """Renderiza la pantalla de configuración"""
-        title = self.font_big.render("CONFIGURACION", True, (255, 255, 0))
-        self.screen.blit(title, title.get_rect(center=(self.current_width//2, 100)))
-        
-        # Mostrar configuración actual con mejor espaciado
+        # Calcular posiciones responsive
         center_x = self.current_width // 2
+        title_y = min(60, self.current_height // 12)
+        
+        title = self.font_big.render("CONFIGURACION", True, (255, 255, 0))
+        self.screen.blit(title, title.get_rect(center=(center_x, title_y)))
+        
+        # Mostrar configuración actual con mejor espaciado responsive
+        base_y = title_y + 60
+        spacing = min(50, (self.current_height - base_y - 200) // 8)
         
         # Número de agentes
+        agents_y = base_y + spacing
         agents_text = f"Numero de Agentes: {self.num_agents}"
         agents_txt = self.font.render(agents_text, True, (255, 255, 255))
-        self.screen.blit(agents_txt, agents_txt.get_rect(center=(center_x, 180)))
-        
-        # Botones de agentes están en y=250, dejamos espacio
+        self.screen.blit(agents_txt, agents_txt.get_rect(center=(center_x, agents_y)))
         
         # Tamaño de celda  
+        size_y = agents_y + spacing * 2
         size_text = f"Tamaño de Celda: {self.cell_size}px"
         size_txt = self.font.render(size_text, True, (255, 255, 255))
-        self.screen.blit(size_txt, size_txt.get_rect(center=(center_x, 320)))
-        
-        # Botones de tamaño están en y=380, dejamos espacio
+        self.screen.blit(size_txt, size_txt.get_rect(center=(center_x, size_y)))
         
         # Área de juego resultante
+        area_y = size_y + spacing * 2
         game_area_w = self.grid_width * self.cell_size
         game_area_h = self.grid_height * self.cell_size
         area_text = f"Area de Juego: {game_area_w}x{game_area_h}px"
         area_txt = self.font_small.render(area_text, True, (180, 180, 180))
-        self.screen.blit(area_txt, area_txt.get_rect(center=(center_x, 460)))
+        self.screen.blit(area_txt, area_txt.get_rect(center=(center_x, area_y)))
         
-        # Instrucciones (más abajo, sin solapar con botón)
+        # Mostrar límites
+        limits_y = area_y + spacing
+        limits_text = f"Limites: Agentes (2-{MAX_AGENTS}), Tamaño ({MIN_CELL_SIZE}-{MAX_CELL_SIZE}px)"
+        limits_txt = self.font_small.render(limits_text, True, (150, 150, 150))
+        self.screen.blit(limits_txt, limits_txt.get_rect(center=(center_x, limits_y)))
+        
+        rounds_y = limits_y + spacing
+        rounds_limit_txt = "infinito" if self.rounds_limit == 0 else str(self.rounds_limit)
+        rounds_text = f"Rondas: {'ON' if self.rounds_enabled else 'OFF'} | Limite: {rounds_limit_txt}"
+        rounds_render = self.font.render(rounds_text, True, (255, 255, 255))
+        self.screen.blit(rounds_render, rounds_render.get_rect(center=(center_x, rounds_y)))
+        
+        pre_banner_y = rounds_y + spacing
+        pre_text = f"Banner Pre-Ronda: {'ON' if self.pre_round_banner_enabled else 'OFF'}"
+        pre_render = self.font_small.render(pre_text, True, (255, 255, 255))
+        self.screen.blit(pre_render, pre_render.get_rect(center=(center_x, pre_banner_y)))
+        
+        # Instrucciones (ajustar según espacio disponible)
+        instructions_y = min(pre_banner_y + spacing * 2, self.current_height - 100)
         instructions = [
             "Usa los botones para ajustar la configuracion",
             "ESC para volver al menu principal"
@@ -603,7 +974,7 @@ class GameApp:
         
         for i, instruction in enumerate(instructions):
             txt = self.font_small.render(instruction, True, (150, 150, 150))
-            self.screen.blit(txt, txt.get_rect(center=(center_x, 640 + i * 25)))
+            self.screen.blit(txt, txt.get_rect(center=(center_x, instructions_y + i * 20)))
         
         # Botones
         for btn in self.menu_buttons:
@@ -636,13 +1007,21 @@ class GameApp:
         for i in range(num_ias):
             env = SnakeEnvironment()
             env.reset()
+            env.update_max_steps(1000000)
             self.ia_envs.append(env)
             
             if self.models and len(self.models) > 0:
                 # Repetir modelos si hay más agentes que modelos
-                model_info = self.models[i % len(self.models)]
+                model_idx = i % len(self.models)
+                model_info = self.models[model_idx]
+                model_name = model_info['name']
+                # Si hay más IAs que modelos, agregar número de instancia al nombre
+                if num_ias > len(self.models) and i >= len(self.models):
+                    instance_num = (i // len(self.models)) + 1
+                    model_name = f"{model_info['name']}_#{instance_num}"
+                
                 try:
-                    print(f"[IA] Cargando modelo: {model_info['name']} desde {model_info['path']}")
+                    print(f"[IA] Cargando modelo: {model_name} desde {model_info['path']}")
                     agent = REINFORCEAgent(state_size=62, action_size=4)
                     checkpoint = torch.load(model_info['path'], map_location='cpu')
                     
@@ -655,8 +1034,8 @@ class GameApp:
                     agent.policy_net.eval()
                     
                     # Verificar que el modelo se cargó correctamente
-                    print(f"[IA] OK Modelo {model_info['name']} cargado correctamente")
-                    self.ia_agents.append({'agent': agent, 'name': model_info['name'], 'trained': True})
+                    print(f"[IA] OK Modelo {model_name} cargado correctamente")
+                    self.ia_agents.append({'agent': agent, 'name': model_name, 'trained': True})
                     
                 except Exception as e:
                     print(f"[IA] ERROR cargando {model_info['name']}: {e}")
@@ -679,6 +1058,8 @@ class GameApp:
         self.human_env = None
         self.ia_envs = []
         self.ia_agents = []
+        self.death_log = []
+        self.ia_grace_until = {}
         
         num_ias = self.num_agents
         
@@ -689,9 +1070,16 @@ class GameApp:
             
             if self.models and len(self.models) > 0:
                 # Repetir modelos si hay más agentes que modelos
-                model_info = self.models[i % len(self.models)]
+                model_idx = i % len(self.models)
+                model_info = self.models[model_idx]
+                model_name = model_info['name']
+                # Si hay más IAs que modelos, agregar número de instancia al nombre
+                if num_ias > len(self.models) and i >= len(self.models):
+                    instance_num = (i // len(self.models)) + 1
+                    model_name = f"{model_info['name']}_#{instance_num}"
+                
                 try:
-                    print(f"[IA] Cargando modelo: {model_info['name']} desde {model_info['path']}")
+                    print(f"[IA] Cargando modelo: {model_name} desde {model_info['path']}")
                     agent = REINFORCEAgent(state_size=62, action_size=4)
                     checkpoint = torch.load(model_info['path'], map_location='cpu')
                     
@@ -702,8 +1090,8 @@ class GameApp:
                     agent.policy_net.load_state_dict(checkpoint['model_state_dict'])
                     agent.policy_net.eval()
                     
-                    print(f"[IA] OK Modelo {model_info['name']} cargado correctamente")
-                    self.ia_agents.append({'agent': agent, 'name': model_info['name'], 'trained': True})
+                    print(f"[IA] OK Modelo {model_name} cargado correctamente")
+                    self.ia_agents.append({'agent': agent, 'name': model_name, 'trained': True})
                     
                 except Exception as e:
                     print(f"[IA] ERROR cargando {model_info['name']}: {e}")
@@ -794,9 +1182,7 @@ class GameApp:
         
         if done:
             self.winner = "Humano"
-            self.previous_mode = self.mode
-            self.mode = GameMode.GAME_OVER
-            self.create_game_over_menu()
+            self.enter_game_over()
 
     def update_human_vs_ia(self):
         """Actualiza modo humano vs IA"""
@@ -868,25 +1254,18 @@ class GameApp:
                 ia_name = self.ia_agents[i]['name'] if i < len(self.ia_agents) else f'IA_{i+1}'
                 alive_players.append((ia_name, score_idx, score))
         
-        # Game over si queda 1 o menos jugadores vivos
-        if len(alive_players) <= 1:
-            if len(alive_players) == 1:
-                # Hay un ganador claro
-                self.winner = alive_players[0][0]
-                print(f"[GAME] ¡{self.winner} gana con {alive_players[0][2]} puntos!")
+        # Game over solo si TODOS los jugadores mueren
+        if len(alive_players) == 0:
+            # Todos murieron, ganador por mayor score
+            max_score = max(self.scores) if self.scores else 0
+            winner_idx = self.scores.index(max_score) if self.scores else 0
+            if winner_idx == 0:
+                self.winner = "Humano"
             else:
-                # Todos murieron, ganador por mayor score
-                max_score = max(self.scores) if self.scores else 0
-                winner_idx = self.scores.index(max_score) if self.scores else 0
-                if winner_idx == 0:
-                    self.winner = "Humano"
-                else:
-                    self.winner = self.ia_agents[winner_idx-1]['name'] if winner_idx-1 < len(self.ia_agents) else "Empate"
-                print(f"[GAME] Todos murieron. {self.winner} gana por mayor score: {max_score}")
+                self.winner = self.ia_agents[winner_idx-1]['name'] if winner_idx-1 < len(self.ia_agents) else "Empate"
+            print(f"[GAME] Todos murieron. {self.winner} gana por mayor score: {max_score}")
             
-            self.previous_mode = self.mode
-            self.mode = GameMode.GAME_OVER
-            self.create_game_over_menu()
+            self.enter_game_over()
 
     def update_ia_vs_ia(self):
         """Actualiza modo IA vs IA"""
@@ -907,6 +1286,39 @@ class GameApp:
                 
                 # Ejecutar acción
                 new_state, reward, done, info = env.step(action)
+                now = time.time()
+                if done and self.ia_grace_until.get(i, 0) > now:
+                    env.done = False
+                    done = False
+                    reward = 0
+                    name = self.ia_agents[i]['name'] if i < len(self.ia_agents) else f'IA_{i+1}'
+                    print(f"[IA-VS-IA][GRACE] {name} muerte ignorada por invulnerabilidad temporal")
+                if done:
+                    direction_names = {0: "UP", 1: "DOWN", 2: "LEFT", 3: "RIGHT"}
+                    head_x, head_y = env.snake_positions[0]
+                    dx_dy = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0)}
+                    dx, dy = dx_dy.get(env.direction, (0, 0))
+                    attempted_x = head_x + dx
+                    attempted_y = head_y + dy
+                    cause = "SELF" if reward == env.reward_config.get('self_collision', None) else ("WALL" if reward == env.reward_config.get('death', None) else ("TIMEOUT" if env.steps >= env.max_steps else "OTHER"))
+                    name = self.ia_agents[i]['name'] if i < len(self.ia_agents) else f'IA_{i+1}'
+                    score = self.scores[i] if i < len(self.scores) else 0
+                    log_entry = {
+                        'ts': time.time(),
+                        'name': name,
+                        'idx': i,
+                        'score': score,
+                        'cause': cause,
+                        'pos': (head_x, head_y),
+                        'attempt': (attempted_x, attempted_y),
+                        'dir': direction_names.get(env.direction, "UNKNOWN")
+                    }
+                    self.death_log.append(log_entry)
+                    alive_count = sum(1 for e in self.ia_envs if e and not e.done)
+                    print(f"[IA-VS-IA][DEATH] {name} causa={cause} score={score} dir={log_entry['dir']} pos={log_entry['pos']} intento={log_entry['attempt']} vivos_restantes={alive_count}")
+                    for j, e2 in enumerate(self.ia_envs):
+                        if j != i and e2 and not e2.done:
+                            self.ia_grace_until[j] = now + 2.0
                 
                 # Verificar colisión con comida y actualizar score
                 if self.check_food_collision(env, i):
@@ -922,22 +1334,15 @@ class GameApp:
                 ia_name = self.ia_agents[i]['name'] if i < len(self.ia_agents) else f'IA_{i+1}'
                 alive_ias.append((ia_name, i, score))
         
-        # Game over si queda 1 o menos IAs vivas
-        if len(alive_ias) <= 1:
-            if len(alive_ias) == 1:
-                # Hay una IA ganadora
-                self.winner = alive_ias[0][0]
-                print(f"[GAME] ¡{self.winner} gana con {alive_ias[0][2]} puntos!")
-            else:
-                # Todas murieron, ganador por mayor score
-                max_score = max(self.scores) if self.scores else 0
-                winner_idx = self.scores.index(max_score) if self.scores else 0
-                self.winner = self.ia_agents[winner_idx]['name'] if winner_idx < len(self.ia_agents) else "Empate"
-                print(f"[GAME] Todas las IAs murieron. {self.winner} gana por mayor score: {max_score}")
+        # Game over solo si TODAS las IAs mueren
+        if len(alive_ias) == 0:
+            # Todas murieron, ganador por mayor score
+            max_score = max(self.scores) if self.scores else 0
+            winner_idx = self.scores.index(max_score) if self.scores else 0
+            self.winner = self.ia_agents[winner_idx]['name'] if winner_idx < len(self.ia_agents) else "Empate"
+            print(f"[GAME] Todas las IAs murieron. {self.winner} gana por mayor score: {max_score}")
             
-            self.previous_mode = self.mode
-            self.mode = GameMode.GAME_OVER
-            self.create_game_over_menu()
+            self.enter_game_over()
 
     def update_solo_ia(self):
         """Actualiza modo solo IA"""
@@ -968,28 +1373,29 @@ class GameApp:
             
             if done:
                 self.winner = agent_data['name']
-                self.previous_mode = self.mode
-                self.mode = GameMode.GAME_OVER
-                self.create_game_over_menu()
+                self.enter_game_over()
 
     def create_game_over_menu(self):
         """Crea menú de game over"""
         self.menu_buttons = []
         btn_w, btn_h = 250, 50
-        x = (WINDOW_WIDTH - btn_w) // 2
+        center_x = self.current_width // 2
+        x = center_x - btn_w // 2
         
-        # Calcular posición Y basada en número de jugadores para evitar superposición
-        num_players = len(self.ia_agents) + (1 if self.human_env is not None else 0)
-        y0 = 280 + (num_players * 35) + 40  # Después de la tabla de posiciones
+        # Calcular posición Y responsive basada en altura disponible
+        # El ranking se renderiza arriba, los botones van abajo
+        buttons_start_y = max(self.current_height - 200, 400)
         spacing = 60
         
-        self.menu_buttons.append(Button((x, y0, btn_w, btn_h), "🔄 Jugar de Nuevo", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.restart_game))
-        self.menu_buttons.append(Button((x, y0+spacing, btn_w, btn_h), "📋 Menú Principal", self.font_small, (60,60,180), (255,255,255), (100,100,220), self.go_to_main_menu))
-        self.menu_buttons.append(Button((x, y0+2*spacing, btn_w, btn_h), "❌ Salir", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.quit))
+        self.menu_buttons.append(Button((x, buttons_start_y, btn_w, btn_h), "🔄 Jugar de Nuevo", self.font_small, (60,180,60), (255,255,255), (100,220,100), self.restart_game))
+        self.menu_buttons.append(Button((x, buttons_start_y+spacing, btn_w, btn_h), "📋 Menú Principal", self.font_small, (60,60,180), (255,255,255), (100,100,220), self.go_to_main_menu))
+        self.menu_buttons.append(Button((x, buttons_start_y+2*spacing, btn_w, btn_h), "❌ Salir", self.font_small, (180,60,60), (255,255,255), (220,100,100), self.quit))
 
     def restart_game(self):
         """Reinicia el juego actual"""
         previous_mode = self.previous_mode
+        if self.rounds_enabled:
+            self.current_round += 1
         self.reset_game()
         if previous_mode == GameMode.HUMAN:
             self.mode = GameMode.HUMAN
@@ -1003,8 +1409,30 @@ class GameApp:
         elif previous_mode == GameMode.SOLO_IA:
             self.mode = GameMode.SOLO_IA
             self.start_solo_ia()
+        if self.pre_round_banner_enabled:
+            self.pre_round_banner_until = time.time() + self.pre_round_banner_duration
 
     def go_to_main_menu(self):
         """Vuelve al menú principal"""
         self.mode = GameMode.MAIN_MENU
         self.create_main_menu()
+        self.current_round = 0
+
+    def enter_game_over(self):
+        self.previous_mode = self.mode
+        self.mode = GameMode.GAME_OVER
+        self.game_over_time = time.time()
+        self.create_game_over_menu()
+
+    def update_game_over(self):
+        if not self.rounds_enabled:
+            return
+        if self.game_over_time is None:
+            return
+        elapsed = time.time() - self.game_over_time
+        if elapsed >= self.game_over_auto_restart_seconds:
+            if self.rounds_limit > 0 and self.current_round >= self.rounds_limit:
+                self.mode = GameMode.MAIN_MENU
+                self.create_main_menu()
+            else:
+                self.restart_game()
